@@ -39,6 +39,12 @@
 #include "schema_def.h"
 #include "small/mempool.h"
 
+void
+memtx_tx_print_story(struct memtx_story *story, uint32_t idx);
+
+void
+memtx_tx_print_space(uint32_t space_id);
+
 static uint32_t
 memtx_tx_story_key_hash(const struct tuple *a)
 {
@@ -1902,6 +1908,8 @@ memtx_tx_history_commit_stmt(struct txn_stmt *stmt, size_t *bsize,
 	}
 }
 
+bool print_clarified;
+
 struct tuple *
 memtx_tx_tuple_clarify_slow(struct txn *txn, struct space *space,
 			    struct tuple *tuple, struct index *index,
@@ -1909,6 +1917,8 @@ memtx_tx_tuple_clarify_slow(struct txn *txn, struct space *space,
 {
 	assert(tuple->is_dirty);
 	struct memtx_story *story = memtx_tx_story_get(tuple);
+	if (print_clarified)
+		memtx_tx_print_story(story, index->dense_id);
 	struct memtx_story *last_checked_story = story;
 	bool own_change = false;
 	struct tuple *result = NULL;
@@ -2491,4 +2501,78 @@ memtx_tx_snapshot_cleaner_destroy(struct memtx_tx_snapshot_cleaner *cleaner)
 {
 	if (cleaner->ht != NULL)
 		mh_snapshot_cleaner_delete(cleaner->ht);
+}
+
+#include "schema.h"
+
+const char *
+txn_status_letter(struct txn *txn)
+{
+	switch (txn->status) {
+	case TXN_INPROGRESS: return "I";
+	case TXN_PREPARED: return "P";
+	case TXN_CONFLICTED: return "X";
+	case TXN_IN_READ_VIEW: return "R";
+	case TXN_COMMITTED: return "C";
+	case TXN_ABORTED: return "A";
+	default: return "U";
+	}
+}
+
+void
+memtx_tx_print_story(struct memtx_story *story, uint32_t idx)
+{
+	size_t j = 0;
+	do {
+		if (j)
+			printf("    ");
+		printf("%s", tuple_str(story->tuple));
+		printf(" /%ld %ld/", story->add_psn, story->del_psn);
+		if (story->add_stmt != NULL) {
+			printf(" added by %lu%s",
+			       story->add_stmt->txn->id,
+			       txn_status_letter(story->add_stmt->txn));
+			assert(story->add_stmt->add_story == story);
+		}
+		struct txn_stmt * del_stmt = story->del_stmt;
+		if (del_stmt != NULL) {
+			printf(" deleted by %lu%s",
+			       del_stmt->txn->id,
+			       txn_status_letter(del_stmt->txn));
+			assert(del_stmt->del_story == story);
+			del_stmt = del_stmt->next_in_del_list;
+			while (del_stmt != NULL) {
+				printf(", %lu%s",
+				       del_stmt->txn->id,
+				       txn_status_letter(del_stmt->txn));
+				assert(del_stmt->del_story == story);
+				del_stmt = del_stmt->next_in_del_list;
+			}
+		}
+		printf("\n");
+		story = story->link[idx].older_story;
+		j++;
+	} while (story != NULL);
+}
+
+void
+memtx_tx_print_space(uint32_t space_id)
+{
+	struct space *space = space_by_id(space_id);
+	if (space == NULL) {
+		printf("space was not found\n");
+		return;
+	}
+	print_clarified = true;
+	for (uint32_t i = 0; i < space->index_count; i++) {
+		struct index *index = space->index[i];
+		printf("index %s\n", index->def->name);
+		struct iterator *itr = index_create_iterator(index, ITER_ALL,
+							     NULL, 0);
+		struct tuple *tuple;
+		while (iterator_next(itr, &tuple) == 0 && tuple != NULL) {
+		}
+		iterator_delete(itr);
+	}
+	print_clarified = false;
 }

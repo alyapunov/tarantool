@@ -473,3 +473,4 @@ uri_set_destroy
 uuid_nil
 uuid_unpack
 _say
+memtx_tx_print_space

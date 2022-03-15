@@ -2195,6 +2195,11 @@ space_mt.run_triggers = function(space, yesno)
     builtin.space_run_triggers(s, yesno)
 end
 space_mt.frommap = box.internal.space.frommap
+space_mt.print_history = function(space)
+    ffi = require('ffi')
+    ffi.cdef('void memtx_tx_print_space(unsigned space_id)')
+    ffi.C.memtx_tx_print_space(space.id)
+end
 space_mt.__index = space_mt
 
 local ck_constraint_mt = {}
