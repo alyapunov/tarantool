@@ -1,0 +1,54 @@
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=128, payload=4, iterations=16) has been validated
+ok 2 - prbuf(size=128, payload=4, iterations=32) has been validated
+ok 3 - prbuf(size=128, payload=4, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=128, payload=16, iterations=16) has been validated
+ok 2 - prbuf(size=128, payload=16, iterations=32) has been validated
+ok 3 - prbuf(size=128, payload=16, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=128, payload=40, iterations=16) has been validated
+ok 2 - prbuf(size=128, payload=40, iterations=32) has been validated
+ok 3 - prbuf(size=128, payload=40, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=256, payload=4, iterations=16) has been validated
+ok 2 - prbuf(size=256, payload=4, iterations=32) has been validated
+ok 3 - prbuf(size=256, payload=4, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=256, payload=16, iterations=16) has been validated
+ok 2 - prbuf(size=256, payload=16, iterations=32) has been validated
+ok 3 - prbuf(size=256, payload=16, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=256, payload=40, iterations=16) has been validated
+ok 2 - prbuf(size=256, payload=40, iterations=32) has been validated
+ok 3 - prbuf(size=256, payload=40, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=512, payload=4, iterations=16) has been validated
+ok 2 - prbuf(size=512, payload=4, iterations=32) has been validated
+ok 3 - prbuf(size=512, payload=4, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=512, payload=16, iterations=16) has been validated
+ok 2 - prbuf(size=512, payload=16, iterations=32) has been validated
+ok 3 - prbuf(size=512, payload=16, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
+	*** test_buffer_foreach_copy_number ***
+1..3
+ok 1 - prbuf(size=512, payload=40, iterations=16) has been validated
+ok 2 - prbuf(size=512, payload=40, iterations=32) has been validated
+ok 3 - prbuf(size=512, payload=40, iterations=64) has been validated
+	*** test_buffer_foreach_copy_number: done ***
