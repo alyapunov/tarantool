@@ -4,30 +4,14 @@
  *
  * Copyright 2010-2022, Tarantool AUTHORS, please see AUTHORS file.
  */
+
 #include <stdbool.h>
 #include <stddef.h>
-
-/** Data entry of prbuf. Public analogue of struct prbuf_record. */
-struct prbuf_entry {
-	/**
-	 * Size of data which is stored in a chunk; it doesn't account
-	 * memory overhead per entry.
-	 */
-	size_t size;
-	/** Pointer to stored user data. */
-	char *ptr;
-};
+#include <stdint.h>
 
 /** Defined in prbuf.c */
 struct prbuf_header;
 struct prbuf_record;
-
-struct prbuf_iterator {
-	/** Iterator is related to this buffer. */
-	struct prbuf *buf;
-	/** Iterator is positioned to this entry. */
-	struct prbuf_record *current;
-};
 
 /**
  * prbuf stands for partitioned ring buffer. It is designed in the way that
@@ -42,8 +26,15 @@ struct prbuf {
 	struct prbuf_header *header;
 };
 
+struct prbuf_iterator {
+	/** Iterator is related to this buffer. */
+	struct prbuf_header *header;
+	/** Iterator is positioned to this entry. */
+	uint32_t current;
+};
+
 /**
- * Create prbuf entry. Metadata for the buffer is allocated in the
+ * Create an empry prbuf entry. Metadata for the buffer is allocated in the
  * provided @mem, so in fact the capacity of the buffer is less than @a size.
  * Destructor for buffer is not provided.
  */
@@ -56,7 +47,7 @@ prbuf_create(struct prbuf *buf, void *mem, size_t size);
  * match given one or buffer contains spoiled entry - return -1.
  */
 int
-prbuf_open(struct prbuf *buf, void *mem);
+prbuf_open(struct prbuf *buf, void *mem, size_t size);
 
 /**
  * Returns pointer to memory chunk sizeof @a size.
@@ -64,25 +55,19 @@ prbuf_open(struct prbuf *buf, void *mem);
  * the same chunk twice.
  */
 void *
-prbuf_prepare(struct prbuf *buf, size_t size);
+prbuf_prepare(struct prbuf *buf, uint32_t size);
 
 /** Commits the last prepared memory chunk. */
 void
 prbuf_commit(struct prbuf *buf);
 
-
-/** Create iterator pointing to the start of the @a buf. */
+/** Create an iterator. */
 void
 prbuf_iterator_create(struct prbuf *buf, struct prbuf_iterator *iter);
 
 /**
- * Move iterator to the next entry. In case @a iter already positioned to
- * the last entry (to be more precise - the most freshest entry with
- * @a offset_last) - @a res is invalidated.
+ * Gets an entry and moves the iterator to the next position.
+ * returns 0 on success, -1 if there are no more entries.
  */
 int
-prbuf_iterator_next(struct prbuf_iterator *iter, struct prbuf_entry *res);
-
-/** Return true in case given entry is invalid. */
-bool
-prbuf_entry_is_invalid(struct prbuf_entry *entry);
+prbuf_iterator_next(struct prbuf_iterator *iter, char **data, uint32_t *size);

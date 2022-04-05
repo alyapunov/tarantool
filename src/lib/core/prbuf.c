@@ -4,18 +4,30 @@
  * Copyright 2010-2022, Tarantool AUTHORS, please see AUTHORS file.
  */
 #include "prbuf.h"
-#include "bit/bit.h"
+
+#include <assert.h>
+#include <string.h>
 
 /**
- * Partitioned ring buffer. Each entry stores size before user data.
+ * Partitioned ring buffer. Each record stores size before user data.
  * So the typical buffer looks like:
- * HEADER uint32 DATA uint32 DATA ...
+ * HEADER....... uint32 DATA uint32 DATA ...
  *
  * We have to store offsets to be able to restore buffer (including
  * all metadata) from raw pointer. Otherwise it is impossible to point
- * out where head/tail are located.
+ * out where head/tail are located. Offsets are measured from the beginning
+ * of entire memory block (that is the first byte of header). For example:
+ * HEADER....... uint32 DATA uint32 DATA
+ * <---begin---->
+ * <--------------end------------------>
+ *
+ * All records are aligned, so there can be a small paddings between records.
+ * In the end of the buffer there can be a fake record. It appears when newly
+ * added record does not fit the space from current write position to the end
+ * of buffer, so we have to fill remaining space with something correct but
+ * distinguishable (for iterator) from normal record.
  */
-struct PACKED prbuf_header {
+struct prbuf_header {
 	/**
 	 * Buffer's data layout can be changed in the future, so for the sake
 	 * of proper recovery of the buffer we store its version.
@@ -23,24 +35,23 @@ struct PACKED prbuf_header {
 	uint32_t version;
 	/** Total size of buffer (including header). */
 	uint32_t size;
-	/**
-	 * Offset of the oldest entry - it is the first candidate to be
-	 * overwritten. Note that in contrast to iterator/entry - this offset
-	 * is calculated to the first byte of entry (i.e. header containing
-	 * size of entry).
-	 * */
-	uint32_t offset_begin;
+	/** Offset of the first (oldest) record. */
+	uint32_t begin;
 	/** Offset of the next byte after the last (written) record. */
-	uint32_t offset_end;
+	uint32_t end;
 };
+
+static const uint32_t BASE_OFFSET = sizeof(struct prbuf_header);
+static const uint32_t PRBUF_FAKE = 1u << 31;
+static const uint32_t PRBUF_SIZE = UINT32_MAX ^ PRBUF_FAKE;
 
 /**
  * Structure representing record stored in the buffer so it has the same
  * memory layout.
  */
 struct prbuf_record {
-	/** Size of data. */
-	uint32_t size;
+	/** Size of data ORed with flags. */
+	uint32_t flag_size;
 	/** Data. */
 	char data[];
 };
@@ -58,274 +69,194 @@ static const uint32_t prbuf_version = 0;
  * wrap entry if it doesn't fit til the buffer's end.
  *
  * There are several assumptions regarding the buffer:
- * - Buffer always contains at least one element;
- * - The end of the buffer (in the linear sense) contains "end mark";
  * - The minimal size of the buffer is restricted;
  * - Iteration direction - from the oldest entry to the newest;
  */
 
-/** A mark of unused space in the buffer: trash is located after this point. */
-static const uint32_t prbuf_end_position = (uint32_t)(-1);
-
-/** Before storing a data in the buffer we place its size (i.e. header). */
-static const size_t entry_meta_size = sizeof(uint32_t);
-
-static struct prbuf_entry invalid_entry =
-	{ .size = (uint32_t)(-1), .ptr = NULL };
-
-/** Real size of allocation is (data size + record's header). */
-static uint32_t
-prbuf_record_alloc_size(size_t size)
-{
-	return size + entry_meta_size;
-}
-
-/** Returns pointer to the next byte after end of given buffer. */
-static char *
-prbuf_linear_end(struct prbuf *buf)
-{
-	return (char *) buf->header + buf->header->size;
-}
-
-/** Returns pointer to the first writable byte of given buffer. */
-static char *
-prbuf_linear_begin(struct prbuf *buf)
-{
-	return (char *) buf->header + sizeof(struct prbuf_header);
-}
-
-/** Returns pointer to the next byte after the last written record. */
-static char *
-prbuf_current_raw(struct prbuf *buf)
-{
-	return prbuf_linear_begin(buf) + buf->header->offset_end;
-}
-
-static struct prbuf_record *
-prbuf_current_record(struct prbuf *buf)
-{
-	return (struct prbuf_record *) prbuf_current_raw(buf);
-}
-
-/** Returns first (in historical sense) record. */
-static struct prbuf_record *
-prbuf_first_record(struct prbuf *buf)
-{
-	assert(buf->header->offset_begin != prbuf_end_position);
-	char *first_ptr = prbuf_linear_begin(buf) + buf->header->offset_begin;
-	return (struct prbuf_record *) first_ptr;
-}
-
-/** Calculate offset from the buffer's start to the given entry. */
-static uint32_t
-prbuf_record_offset(struct prbuf *buf, struct prbuf_record *record)
-{
-	assert((char *) record >= prbuf_linear_begin(buf));
-	return (uint32_t) ((char *) record - prbuf_linear_begin(buf));
-}
-
-/** Returns true in case buffer has at least @a size bytes until its linear end. */
-static bool
-prbuf_has_before_end(struct prbuf *buf, uint32_t size)
-{
-	assert(prbuf_linear_end(buf) >= prbuf_current_raw(buf));
-	if ((uint32_t) (prbuf_linear_end(buf) - prbuf_current_raw(buf)) >= size)
-		return true;
-	return false;
-}
-
 void
 prbuf_create(struct prbuf *buf, void *mem, size_t size)
 {
-	assert(size > sizeof(struct prbuf));
+#ifndef NDEBUG
+	memset(mem, '#', size);
+#endif
+	assert(size > BASE_OFFSET);
+	assert(size < PRBUF_SIZE);
 	buf->header = (struct prbuf_header *) mem;
-	buf->header->offset_end = 0;
-	buf->header->offset_begin = 0;
 	buf->header->version = prbuf_version;
 	buf->header->size = size;
+	buf->header->begin = BASE_OFFSET;
+	buf->header->end = BASE_OFFSET;
+}
 
-	uint32_t available_space = size - sizeof(struct prbuf_header);
-#ifndef NDEBUG
-	memset(prbuf_linear_begin(buf), '#', available_space);
-#endif
-	/*
-	 * Place single entry occupying whole space. It's done just for
-	 * the sake of convenience.
-	 */
-	char *begin = prbuf_current_raw(buf);
-	store_u32(begin, available_space - entry_meta_size);
-	buf->header->offset_end = available_space;
+/** Get record by offset. */
+static struct prbuf_record *
+prbuf_get_record(struct prbuf_header *h, uint32_t offset)
+{
+	return (struct prbuf_record *) ((char *) h + offset);
 }
 
 /**
- * Verify that prbuf remains in the consistent state: header is valid and
- * all entries have readable sizes.
+ * Total size of a record, including struct prbuf_record header, rounded up to
+ * fulfill record alignment. You may pass flags withing size argument, they
+ * will be ignored.
  */
-static bool
-prbuf_check(struct prbuf *buf)
+static uint32_t
+prbuf_record_size(uint32_t size)
 {
-	if (buf->header->version != prbuf_version)
-		return false;
-	struct prbuf_iterator iter;
-	struct prbuf_entry res;
-	prbuf_iterator_create(buf, &iter);
-	uint32_t total_size = 0;
-	while (prbuf_iterator_next(&iter, &res) == 0 &&
-	       ! prbuf_entry_is_invalid(&res))
-		total_size += res.size;
-	return (total_size <= buf->header->size);
+	const uint32_t jump = offsetof(struct prbuf_record, data[0]);
+	const uint32_t align = _Alignof(struct prbuf_record);
+	const uint32_t mask = PRBUF_SIZE & ~(align - 1);
+	return (size + jump + align - 1) & mask;
 }
 
 int
-prbuf_open(struct prbuf *buf, void *mem)
+prbuf_open(struct prbuf *buf, void *mem, size_t size)
 {
-	buf->header = (struct prbuf_header *) mem;
-	if (! prbuf_check(buf))
+	buf->header = mem;
+	struct prbuf_header *h = buf->header;
+	if (size <= BASE_OFFSET || size >= PRBUF_SIZE)
 		return -1;
+	if (h->version != prbuf_version)
+		return -1;
+	if (h->size != size)
+		return -1;
+	if (h->begin < BASE_OFFSET || h->begin >= h->size)
+		return -1;
+	if (h->end < BASE_OFFSET || h->end >= h->size)
+		return -1;
+
+	/* Check records. */
+	if (h->begin == BASE_OFFSET && h->end == BASE_OFFSET)
+		return 0; /* The one and only case with no records. */
+
+	uint32_t current = h->begin;
+	while (current >= h->end) {
+		struct prbuf_record *rec = prbuf_get_record(h, current);
+		uint32_t rec_size = prbuf_record_size(rec->flag_size);
+		if (rec_size > h->size - current)
+			return -1;
+		if ((rec->flag_size & PRBUF_FAKE) &&
+		    (rec_size != h->size - current))
+			return -1;
+		if (rec_size == h->size - current)
+			current = BASE_OFFSET;
+		else
+			current += rec_size;
+	}
+
+	while (current < h->end) {
+		struct prbuf_record *rec = prbuf_get_record(h, current);
+		uint32_t rec_size = prbuf_record_size(rec->flag_size);
+		if (rec->flag_size & PRBUF_FAKE)
+			return -1;
+		if (rec_size > h->end - current)
+			return -1;
+		current += rec_size;
+	}
+
 	return 0;
 }
 
-static struct prbuf_record *
-prbuf_skip_record(struct prbuf *buf, struct prbuf_record *current,
-		  ssize_t to_store)
-{
-	assert(to_store > 0);
-	assert(to_store <= buf->header->size);
-	struct prbuf_iterator iter = {
-		.buf = buf,
-		.current = current,
-	};
-	struct prbuf_entry res;
-	while (to_store > 0) {
-		assert(iter.current->size != prbuf_end_position);
-		assert(iter.current->size != 0);
-		to_store -= prbuf_record_alloc_size(iter.current->size);
-		if (prbuf_iterator_next(&iter, &res) != 0 &&
-		    ! prbuf_entry_is_invalid(&res)) {
-			prbuf_iterator_create(buf, &iter);
-			prbuf_iterator_next(&iter, &res);
-		}
-	}
-	return iter.current;
-}
-
-/** Place special mark at the end of buffer to avoid out-of-bound access. */
+/** Remove the first record from list. */
 static void
-prbuf_set_end_position(struct prbuf *buf)
+prbuf_drop_record(struct prbuf_header *h)
 {
-	if (prbuf_has_before_end(buf, entry_meta_size))
-		prbuf_current_record(buf)->size = prbuf_end_position;
+	assert(h->begin != h->end);
+	struct prbuf_record *rec = prbuf_get_record(h, h->begin);
+	uint32_t pos = h->begin + prbuf_record_size(rec->flag_size);
+	assert(pos <= h->size);
+	if (pos == h->size)
+		pos = BASE_OFFSET;
+	h->begin = pos;
 }
 
-/** Store entry's size. */
-static void *
-prbuf_prepare_record(struct prbuf_record *record, size_t size)
+/** Initialize fake record in the end of record list. */
+static void
+prbuf_prepare_fake(struct prbuf_header *h)
 {
-	record->size = size;
+	assert(h->begin <= h->end);
+	assert(h->size - h->end >= sizeof(struct prbuf_record));
+	uint32_t fake_size = h->size - h->end - sizeof(struct prbuf_record);
+	struct prbuf_record *fake = prbuf_get_record(h, h->end);
+	fake->flag_size = fake_size | PRBUF_FAKE;
+}
+
+/** Store entry's size and return pointer to data. */
+static void *
+prbuf_prepare_record(struct prbuf_header *h, size_t size)
+{
+	struct prbuf_record *record = prbuf_get_record(h, h->end);
+	record->flag_size = size;
 	return record->data;
 }
 
 void *
-prbuf_prepare(struct prbuf *buf, size_t size)
+prbuf_prepare(struct prbuf *buf, uint32_t size)
 {
 	assert(size > 0);
-	uint32_t alloc_size = prbuf_record_alloc_size(size);
-	if (alloc_size > (buf->header->size - sizeof(struct prbuf_header)))
+	struct prbuf_header *h = buf->header;
+	uint32_t alloc_size = prbuf_record_size(size);
+	if (BASE_OFFSET + alloc_size > h->size)
 		return NULL;
-	if (prbuf_has_before_end(buf, alloc_size)) {
-		/* Head points to the byte right after the last written entry. */
-		char *head = prbuf_current_raw(buf);
-		struct prbuf_record *next = prbuf_first_record(buf);
-		/* free_space can be overflowed - it's completely OK. */
-		uint32_t free_space = (char *) next - head;
-		/*
-		 * We can safely write entry in case it won't overwrite
-		 * anything. Either trash space between two entries
-		 * is large enough or the next entry to be overwritten
-		 * is located at the start of the buffer.
-		 */
-		if (free_space < alloc_size) {
-			struct prbuf_record *next_overwritten =
-				prbuf_skip_record(buf, next, alloc_size);
-			buf->header->offset_begin =
-				  prbuf_record_offset(buf, next_overwritten);
-		}
-		return prbuf_prepare_record((struct prbuf_record *) head, size);
-	}
-	/*
-	 * Data doesn't fit till the end of buffer, so we'll put the entry
-	 * at the buffer's start. Moreover, we should mark the last entry
-	 * (in linear sense) to avoid oud-of-bound access while parsing buffer
-	 * (after this mark trash is stored so we can't process further).
-	 */
-	prbuf_set_end_position(buf);
-	struct prbuf_record *head =
-		(struct prbuf_record *)  prbuf_linear_begin(buf);
-	struct prbuf_record *next_overwritten =
-		prbuf_skip_record(buf, head, alloc_size);
-	buf->header->offset_begin = prbuf_record_offset(buf, next_overwritten);
-	return prbuf_prepare_record(head, size);
+
+	/* Try to allocate from current end. */
+	while (h->begin > h->end && h->end + alloc_size > h->begin)
+		prbuf_drop_record(h);
+	if (h->end + alloc_size <= h->size)
+		return prbuf_prepare_record(h, size);
+
+	/* Fall to the beginning of buffer. */
+	assert(h->begin == BASE_OFFSET);
+	prbuf_drop_record(h);
+	if (h->end != h->size)
+		prbuf_prepare_fake(h);
+	h->end = BASE_OFFSET;
+
+	/* Allocate in the beginning of buffer. */
+	while (h->begin > h->end && h->end + alloc_size > h->begin)
+		prbuf_drop_record(h);
+	return prbuf_prepare_record(h, size);
 }
 
 void
 prbuf_commit(struct prbuf *buf)
 {
-	if (prbuf_has_before_end(buf, entry_meta_size)) {
-		struct prbuf_record *last = prbuf_current_record(buf);
-		if (prbuf_has_before_end(buf, last->size)) {
-			buf->header->offset_end +=
-				prbuf_record_alloc_size(last->size);
-			return;
-		}
-	}
-	struct prbuf_record *last =
-		(struct prbuf_record *) prbuf_linear_begin(buf);
-	buf->header->offset_end = prbuf_record_alloc_size(last->size);
+	struct prbuf_header *h = buf->header;
+	struct prbuf_record *rec = prbuf_get_record(h, h->end);
+	h->end += prbuf_record_size(rec->flag_size);
+	assert(h->end <= h->size);
 }
 
 void
 prbuf_iterator_create(struct prbuf *buf, struct prbuf_iterator *iter)
 {
-	iter->buf = buf;
-	iter->current = NULL;
+	iter->header = buf->header;
+	iter->current = 0;
 }
 
 int
-prbuf_iterator_next(struct prbuf_iterator *iter, struct prbuf_entry *result)
+prbuf_iterator_next(struct prbuf_iterator *itr, char **data, uint32_t *size)
 {
-	struct prbuf *buf = iter->buf;
-	*result = invalid_entry;
-	if (iter->current == NULL) {
-		iter->current = prbuf_first_record(buf);
-		result->size = iter->current->size;
-		result->ptr = iter->current->data;
-		assert(iter->current->size <= buf->header->size);
-		return 0;
+	struct prbuf_header *h = itr->header;
+	struct prbuf_record *rec;
+	if (itr->current == 0) {
+		if (h->begin == BASE_OFFSET && h->end == BASE_OFFSET)
+			return -1; /* Empty buffer. */
+		itr->current = h->begin;
+	} else if (itr->current == h->end) {
+		return -1; /* No more records. */
 	}
 
-	if (iter->current->size > (buf->header->size - sizeof(struct prbuf_header)))
-		return -1;
-	assert((char *)iter->current >= prbuf_linear_begin(buf));
-	char *next_record_ptr = iter->current->data + iter->current->size;
-	if (next_record_ptr == prbuf_current_raw(buf))
-		return 0;
-	assert(prbuf_linear_end(buf) >= next_record_ptr);
+again:
+	rec = prbuf_get_record(h, itr->current);
+	itr->current += prbuf_record_size(rec->flag_size);
+	assert(itr->current <= h->size);
+	if (itr->current == h->size)
+		itr->current = BASE_OFFSET;
+	if (rec->flag_size & PRBUF_FAKE)
+		goto again; /* Skip fake. */
 
-	struct prbuf_record *next = (struct prbuf_record *) next_record_ptr;
-	if ((uint32_t)(prbuf_linear_end(buf) - next_record_ptr) < entry_meta_size)
-		next = (struct prbuf_record *) prbuf_linear_begin(buf);
-	else if (next->size == prbuf_end_position)
-		next = (struct prbuf_record *)  prbuf_linear_begin(buf);
-
-	iter->current = next;
-	result->size = next->size;
-	result->ptr = next->data;
+	*data = rec->data;
+	*size = rec->flag_size;
 	return 0;
-}
-
-bool
-prbuf_entry_is_invalid(struct prbuf_entry *entry)
-{
-	return entry->size == invalid_entry.size &&
-	       entry->ptr == invalid_entry.ptr;
 }

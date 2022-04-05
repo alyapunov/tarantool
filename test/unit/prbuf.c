@@ -62,21 +62,21 @@ test_buffer(uint32_t buffer_size, const char *payload, uint32_t payload_size,
 	}
 
 	struct prbuf recovered_buf;
-	if (prbuf_open(&recovered_buf, mem) != 0) {
+	if (prbuf_open(&recovered_buf, mem, buffer_size) != 0) {
 		rc = RECOVERY_ERROR;
 		goto finish;
 	}
 
 	struct prbuf_iterator iter;
-	struct prbuf_entry entry;
+	char *data;
+	uint32_t data_size;
 	prbuf_iterator_create(&recovered_buf, &iter);
-	while (prbuf_iterator_next(&iter, &entry) == 0 &&
-	       ! prbuf_entry_is_invalid(&entry)) {
-		if (entry.size != payload_size) {
+	while (prbuf_iterator_next(&iter, &data, &data_size) == 0) {
+		if (data_size != payload_size) {
 			rc = WRONG_PAYLOAD_SIZE;
 			goto finish;
 		}
-		if (memcmp(payload, entry.ptr, payload_size) != 0) {
+		if (memcmp(payload, data, payload_size) != 0) {
 			rc = WRONG_PAYLOAD_CONTENT;
 			goto finish;
 		}
