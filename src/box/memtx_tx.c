@@ -543,6 +543,7 @@ memtx_tx_abort_all_for_ddl(struct txn *ddl_owner)
 int
 memtx_tx_cause_conflict(struct txn *breaker, struct txn *victim)
 {
+	assert(breaker != victim);
 	struct tx_conflict_tracker *tracker = NULL;
 	struct rlist *r1 = breaker->conflict_list.next;
 	struct rlist *r2 = victim->conflicted_by_list.next;
@@ -620,7 +621,9 @@ memtx_tx_adjust_position_in_read_view_list(struct txn *txn)
 void
 memtx_tx_handle_conflict(struct txn *breaker, struct txn *victim)
 {
+	assert(breaker != victim);
 	assert(breaker->psn != 0);
+	assert(victim->psn == 0);
 	if (victim->status != TXN_INPROGRESS &&
 	    victim->status != TXN_IN_READ_VIEW) {
 		/* Was conflicted by somebody else. */
@@ -857,7 +860,12 @@ memtx_tx_story_get(struct tuple *tuple)
 
 	mh_int_t pos = mh_history_find(txm.history, tuple, 0);
 	assert(pos != mh_end(txm.history));
-	return *mh_history_node(txm.history, pos);
+	struct memtx_story *story = *mh_history_node(txm.history, pos);
+	if (story->add_stmt != 0)
+		assert(story->add_psn == story->add_stmt->txn->psn);
+	if (story->del_stmt != 0)
+		assert(story->del_psn == story->del_stmt->txn->psn);
+	return story;
 }
 
 /**
@@ -1405,6 +1413,7 @@ static int
 memtx_tx_save_conflict(struct txn *breaker, struct txn *victim,
 		       struct memtx_tx_conflict **conflicts_head)
 {
+	assert(breaker != victim);
 	struct memtx_tx_conflict *next_conflict;
 	next_conflict = memtx_tx_region_alloc_object(breaker,
 						     MEMTX_TX_OBJECT_CONFLICT);
@@ -1501,7 +1510,8 @@ check_hole(struct space *space, uint32_t index,
 
 	struct point_hole_item *item = list;
 	do {
-		if (memtx_tx_save_conflict(inserter, item->txn,
+		if (inserter != item->txn &&
+		    memtx_tx_save_conflict(inserter, item->txn,
 					   collected_conflicts) != 0)
 			return -1;
 		item = rlist_entry(item->ring.next,
@@ -2334,6 +2344,7 @@ memtx_tx_tuple_clarify_impl(struct txn *txn, struct space *space,
 		story = story->link[index->dense_id].older_story;
 	}
 	if (story->del_psn != 0 && story->del_stmt != NULL && txn != NULL) {
+		assert(story->del_psn == story->del_stmt->txn->psn);
 		/*
 		 * If we see a tuple that is deleted by prepared transaction
 		 * then the transaction must be before prepared in serialization
