@@ -35,6 +35,8 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#include "trivia/util.h"
+
 /*------------------------------------------------------------------------- */
 /* R-tree internal structures definition */
 /*------------------------------------------------------------------------- */
@@ -784,6 +786,34 @@ rtree_iterator_goto_next(struct rtree_iterator *itr, unsigned sp)
 	return sp > 0 ? rtree_iterator_goto_next(itr, sp - 1) : false;
 }
 
+/**
+ * Implementation of rtree_iterator_next for simple iterator types (all
+ * except SOP_NEIGHBOR).
+ */
+static record_t
+rtree_iterator_next_simple(struct rtree_iterator *itr)
+{
+	int sp = itr->tree->height - 1;
+	if (!itr->eof && rtree_iterator_goto_next(itr, sp)) {
+		struct rtree_page_branch *b;
+		b = rtree_branch_get(itr->tree,
+				     itr->stack[sp].page, itr->stack[sp].pos);
+		return b->data.record;
+	}
+	itr->eof = true;
+	return NULL;
+}
+
+void
+rtree_iterator_init(struct rtree_iterator *itr)
+{
+	itr->tree = NULL;
+	rtnt_new(&itr->neigh_tree);
+	itr->neigh_free_list = NULL;
+	itr->page_list = NULL;
+	itr->page_pos = INT_MAX;
+}
+
 void
 rtree_iterator_destroy(struct rtree_iterator *itr)
 {
@@ -807,11 +837,23 @@ rtree_iterator_reset_cb(rtnt_t *t, struct rtree_neighbor *n, void *d)
 	return 0;
 }
 
+/**
+ * Common part of preparation of an iterator for a particular search.
+ */
 static void
-rtree_iterator_reset(struct rtree_iterator *itr)
+rtree_iterator_reset(struct rtree_iterator *itr, const struct rtree *tree,
+		     const struct rtree_rect *rect, enum spatial_search_op op)
 {
+	assert(itr->tree == NULL || itr->tree == tree);
+	assert(tree->height <= RTREE_MAX_HEIGHT);
+
 	rtnt_iter(&itr->neigh_tree, 0, rtree_iterator_reset_cb, (void *)itr);
 	rtnt_new(&itr->neigh_tree);
+
+	itr->tree = tree;
+	rtree_rect_copy(&itr->rect, rect, tree->dimension);
+	itr->op = op;
+	itr->version = tree->version;
 }
 
 static struct rtree_neighbor *
@@ -851,16 +893,6 @@ rtree_iterator_free_neighbor(struct rtree_iterator *itr,
 	itr->neigh_free_list = n;
 }
 
-void
-rtree_iterator_init(struct rtree_iterator *itr)
-{
-	itr->tree = 0;
-	rtnt_new(&itr->neigh_tree);
-	itr->neigh_free_list = NULL;
-	itr->page_list = NULL;
-	itr->page_pos = INT_MAX;
-}
-
 static void
 rtree_iterator_process_neigh(struct rtree_iterator *itr,
 			     struct rtree_neighbor *neighbor)
@@ -882,6 +914,41 @@ rtree_iterator_process_neigh(struct rtree_iterator *itr,
 	}
 }
 
+/**
+ * Implementation of rtree_iterator_next for SOP_NEIGHBOR iterator.
+ */
+static record_t
+rtree_iterator_next_neigh(struct rtree_iterator *itr)
+{
+	/* To return element in order of increasing distance from
+	 * specified point, we build sorted list of R-Tree items
+	 * (ordered by distance from specified point) starting from
+	 * root page.
+	 * Algorithm is the following:
+	 *
+	 * insert root R-Tree page in the sorted list
+	 * while sorted list is not empty:
+	 *      get top element from the sorted list
+	 *      if it is tree leaf (record) then return it as
+	 *      current element
+	 *      otherwise (R-Tree page) get children of this R-Tree
+	 *      page and insert them in sorted list
+	*/
+	while (true) {
+		struct rtree_neighbor *neighbor =
+			rtnt_first(&itr->neigh_tree);
+		if (neighbor == NULL)
+			return NULL;
+		rtnt_remove(&itr->neigh_tree, neighbor);
+		if (neighbor->level == 0) {
+			void *child = neighbor->child;
+			rtree_iterator_free_neighbor(itr, neighbor);
+			return (record_t)child;
+		} else {
+			rtree_iterator_process_neigh(itr, neighbor);
+		}
+	}
+}
 
 record_t
 rtree_iterator_next(struct rtree_iterator *itr)
@@ -890,45 +957,10 @@ rtree_iterator_next(struct rtree_iterator *itr)
 		/* Index was updated since cursor initialization */
 		return NULL;
 	}
-	if (itr->op == SOP_NEIGHBOR) {
-		/* To return element in order of increasing distance from
-		 * specified point, we build sorted list of R-Tree items
-		 * (ordered by distance from specified point) starting from
-		 * root page.
-		 * Algorithm is the following:
-		 *
-		 * insert root R-Tree page in the sorted list
-		 * while sorted list is not empty:
-		 *      get top element from the sorted list
-		 *      if it is tree leaf (record) then return it as
-		 *      current element
-		 *      otherwise (R-Tree page)  get siblings of this R-Tree
-		 *      page and insert them in sorted list
-		*/
-		while (true) {
-			struct rtree_neighbor *neighbor =
-				rtnt_first(&itr->neigh_tree);
-			if (neighbor == NULL)
-				return NULL;
-			rtnt_remove(&itr->neigh_tree, neighbor);
-			if (neighbor->level == 0) {
-				void *child = neighbor->child;
-				rtree_iterator_free_neighbor(itr, neighbor);
-				return (record_t)child;
-			} else {
-				rtree_iterator_process_neigh(itr, neighbor);
-			}
-		}
-	}
-	int sp = itr->tree->height - 1;
-	if (!itr->eof && rtree_iterator_goto_next(itr, sp)) {
-		struct rtree_page_branch *b;
-		b = rtree_branch_get(itr->tree,
-				     itr->stack[sp].page, itr->stack[sp].pos);
-		return b->data.record;
-	}
-	itr->eof = true;
-	return NULL;
+	if (itr->op != SOP_NEIGHBOR)
+		return rtree_iterator_next_simple(itr);
+	else
+		return rtree_iterator_next_neigh(itr);
 }
 
 /*------------------------------------------------------------------------- */
@@ -1052,18 +1084,17 @@ rtree_remove(struct rtree *tree, const struct rtree_rect *rect, record_t obj)
 	return true;
 }
 
-bool
-rtree_search(const struct rtree *tree, const struct rtree_rect *rect,
-	     enum spatial_search_op op, struct rtree_iterator *itr)
+/**
+ * Implementation of rtree_search for simple iterator types (all except
+ * SOP_NEIGHBOR).
+ */
+static bool
+rtree_search_simple(struct rtree_iterator *itr)
 {
-	rtree_iterator_reset(itr);
-	assert(itr->tree == 0 || itr->tree == tree);
-	itr->tree = tree;
-	itr->version = tree->version;
-	rtree_rect_copy(&itr->rect, rect, tree->dimension);
-	itr->op = op;
-	assert(tree->height <= RTREE_MAX_HEIGHT);
-	switch (op) {
+	assert(itr->op != SOP_NEIGHBOR);
+	const struct rtree *tree = itr->tree;
+
+	switch (itr->op) {
 	case SOP_ALL:
 		itr->intr_cmp = itr->leaf_cmp = rtree_always_true;
 		break;
@@ -1088,21 +1119,8 @@ rtree_search(const struct rtree *tree, const struct rtree_rect *rect,
 		itr->intr_cmp = rtree_rect_intersects_rect;
 		itr->leaf_cmp = rtree_rect_strict_holds_rect;
 		break;
-	case SOP_NEIGHBOR:
-		if (tree->root) {
-			struct rtree_rect cover;
-			rtree_page_cover(tree, tree->root, &cover);
-			sq_coord_t distance =
-				rtree_rect_neigh_distance(tree, &cover, rect);
-			struct rtree_neighbor *n =
-				rtree_iterator_new_neighbor(itr, tree->root,
-							    distance,
-							    tree->height);
-			rtnt_insert(&itr->neigh_tree, n);
-			return true;
-		} else {
-			return false;
-		}
+	default:
+		unreachable();
 	}
 	if (tree->root && rtree_iterator_goto_first(itr, 0, tree->root)) {
 		itr->stack[tree->height-1].pos -= 1;
@@ -1113,6 +1131,44 @@ rtree_search(const struct rtree *tree, const struct rtree_rect *rect,
 		itr->eof = true;
 		return false;
 	}
+}
+
+/**
+ * Implementation of rtree_search for SOP_NEIGHBOR iterator.
+ */
+static bool
+rtree_search_neigh(struct rtree_iterator *itr)
+{
+	assert(itr->op == SOP_NEIGHBOR);
+	const struct rtree *tree = itr->tree;
+	const struct rtree_rect *rect = &itr->rect;
+
+	if (tree->root) {
+		struct rtree_rect cover;
+		rtree_page_cover(tree, tree->root, &cover);
+		sq_coord_t distance =
+			rtree_rect_neigh_distance(tree, &cover, rect);
+		struct rtree_neighbor *n =
+			rtree_iterator_new_neighbor(itr, tree->root,
+						    distance,
+						    tree->height);
+		rtnt_insert(&itr->neigh_tree, n);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+bool
+rtree_search(const struct rtree *tree, const struct rtree_rect *rect,
+	     enum spatial_search_op op, struct rtree_iterator *itr)
+{
+	rtree_iterator_reset(itr, tree, rect, op);
+
+	if (op != SOP_NEIGHBOR)
+		return rtree_search_simple(itr);
+	else
+		return rtree_search_neigh(itr);
 }
 
 void
