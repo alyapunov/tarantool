@@ -146,8 +146,7 @@ rtree_set2dp(struct rtree_rect *rect, coord_t x, coord_t y)
 }
 
 /**
- * Calculate a comparable distance between rectangle @a rect and
- * upper-left point of rectangle @a neigh_rect.
+ * Calculate a comparable distance between rectangle @a rect1 and @a rect2.
  * The type of distance depends on tree->distance_type, see description
  * of enum rtree_distance_type values.
  * For optimization reasons RTREE_EUCLID distance is calculated squared
@@ -155,19 +154,19 @@ rtree_set2dp(struct rtree_rect *rect, coord_t x, coord_t y)
  * of values that is enough for rtree purposes.
  */
 static sq_coord_t
-rtree_rect_neigh_distance(const struct rtree *tree,
-			  const struct rtree_rect *rect,
-			  const struct rtree_rect *neigh_rect)
+rtree_rect_distance(const struct rtree *tree,
+		    const struct rtree_rect *rect1,
+		    const struct rtree_rect *rect2)
 {
 	sq_coord_t result = 0;
 	for (int i = tree->dimension; --i >= 0; ) {
-		const coord_t *coords = &rect->coords[2 * i];
-		coord_t neigh_coord = neigh_rect->coords[2 * i];
+		const coord_t *coords1 = &rect1->coords[2 * i];
+		const coord_t *coords2 = &rect2->coords[2 * i];
 		sq_coord_t diff = 0;
-		if (neigh_coord < coords[0])
-			diff = coords[0] - neigh_coord;
-		else if (neigh_coord > coords[1])
-			diff = neigh_coord - coords[1];
+		if (coords2[1] < coords1[0])
+			diff = coords1[0] - coords2[1];
+		else if (coords2[0] > coords1[1])
+			diff = coords2[0] - coords1[1];
 		assert(diff >= 0.);
 		if (tree->distance_type == RTREE_EUCLID)
 			result += diff * diff;
@@ -904,9 +903,8 @@ rtree_iterator_process_neigh(struct rtree_iterator *itr,
 	for (int i = 0, n = pg->n; i < n; i++) {
 		struct rtree_page_branch *b;
 		b = rtree_branch_get(itr->tree, pg, i);
-		sq_coord_t distance = rtree_rect_neigh_distance(itr->tree,
-								&b->rect,
-								&itr->rect);
+		sq_coord_t distance =
+			rtree_rect_distance(itr->tree, &b->rect, &itr->rect);
 		struct rtree_neighbor *neigh =
 			rtree_iterator_new_neighbor(itr, b->data.page,
 						    distance, level - 1);
@@ -1146,8 +1144,7 @@ rtree_search_neigh(struct rtree_iterator *itr)
 	if (tree->root) {
 		struct rtree_rect cover;
 		rtree_page_cover(tree, tree->root, &cover);
-		sq_coord_t distance =
-			rtree_rect_neigh_distance(tree, &cover, rect);
+		sq_coord_t distance = rtree_rect_distance(tree, &cover, rect);
 		struct rtree_neighbor *n =
 			rtree_iterator_new_neighbor(itr, tree->root,
 						    distance,

@@ -128,8 +128,8 @@ struct CBox {
 	{
 		coord_t res = 0;
 		for (unsigned i = 0; i < DIMENSION; i++) {
-			if (point.pairs[i].a < pairs[i].a) {
-				coord_t d = pairs[i].a - point.pairs[i].a;
+			if (point.pairs[i].b < pairs[i].a) {
+				coord_t d = pairs[i].a - point.pairs[i].b;
 				res += d * d;
 			} else if (point.pairs[i].a > pairs[i].b) {
 				coord_t d = point.pairs[i].a - pairs[i].b;
@@ -142,8 +142,8 @@ struct CBox {
 	{
 		coord_t res = 0;
 		for (unsigned i = 0; i < DIMENSION; i++) {
-			if (point.pairs[i].a < pairs[i].a) {
-				coord_t d = pairs[i].a - point.pairs[i].a;
+			if (point.pairs[i].b < pairs[i].a) {
+				coord_t d = pairs[i].a - point.pairs[i].b;
 				res += d;
 			} else if (point.pairs[i].a > pairs[i].b) {
 				coord_t d = point.pairs[i].a - pairs[i].b;
