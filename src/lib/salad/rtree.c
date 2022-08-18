@@ -614,7 +614,7 @@ rtree_page_insert(struct rtree *tree, struct rtree_page *page,
 {
 	struct rtree_page_branch br;
 	if (--level != 0) {
-		/* not a leaf page, minize area increase */
+		/* not a leaf page, minimize area increase */
 		unsigned mini = 0;
 		char found = 0;
 		area_t min_incr = 0, best_area = 0;
@@ -751,7 +751,6 @@ rtree_iterator_goto_first(struct rtree_iterator *itr, unsigned sp,
 	}
 	return false;
 }
-
 
 static bool
 rtree_iterator_goto_next(struct rtree_iterator *itr, unsigned sp)
@@ -892,7 +891,7 @@ record_t
 rtree_iterator_next(struct rtree_iterator *itr)
 {
 	if (itr->version != itr->tree->version) {
-		/* Index was updated since cursor initialziation */
+		/* Index was updated since cursor initialization */
 		return NULL;
 	}
 	if (itr->op == SOP_NEIGHBOR) {
@@ -958,7 +957,7 @@ rtree_init(struct rtree *tree, unsigned dimension, uint32_t extent_size,
 		(RTREE_BRANCH_DATA_SIZE + dimension * 2 * sizeof(coord_t));
 	tree->page_size = RTREE_OPTIMAL_BRANCHES_IN_PAGE *
 		tree->page_branch_size + sizeof(int);
-	/* round up to closest power of 2 */
+	/* round up to the lowest power of 2 */
 	int lz = __builtin_clz(tree->page_size - 1);
 	tree->page_size = 1u << (sizeof(int) * CHAR_BIT - lz);
 	assert(tree->page_size - sizeof(int) >=
@@ -993,7 +992,7 @@ rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj)
 		struct rtree_page *p =
 			rtree_page_insert(tree, tree->root, rect, obj, tree->height);
 		if (p != NULL) {
-			/* root splitted */
+			/* root split */
 			struct rtree_page *new_root = rtree_page_alloc(tree);
 			rtree_page_init_with_pages(tree, new_root,
 						   tree->root, p);
@@ -1026,7 +1025,7 @@ rtree_remove(struct rtree *tree, const struct rtree_rect *rect, record_t obj)
 						  &b->rect, b->data.record,
 						  tree->height - level);
 			if (p != NULL) {
-				/* root splitted */
+				/* root split */
 				struct rtree_page *new_root
 					= rtree_page_alloc(tree);
 				rtree_page_init_with_pages(tree, new_root,

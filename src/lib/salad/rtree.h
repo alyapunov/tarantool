@@ -67,33 +67,33 @@ typedef rb_tree(struct rtree_neighbor) rtnt_t;
 enum {
 	/** Maximal possible R-tree height */
 	RTREE_MAX_HEIGHT = 16,
-	/** Maximal possible R-tree height */
+	/** Maximal possible R-tree dimension */
 	RTREE_MAX_DIMENSION = 20
 };
 
 /**
  * Rtree search operations. Used for searching and iterations.
- * All operations except SOP_ALL reqires a rectangle to be set,
+ * All operations except SOP_ALL requires a rectangle to be set,
  * and treat it in different ways
  */
 enum spatial_search_op
 {
-	/* Find and itearate all records */
+	/* Find and iterate all records */
 	SOP_ALL,
-	/* Find and itearate records with the same rectangle */
+	/* Find and iterate records with the same rectangle */
 	SOP_EQUALS,
-	/* Find and itearate records that contain given rectangle */
+	/* Find and iterate records that contain given rectangle */
 	SOP_CONTAINS,
-	/* Find and itearate records that strictly contain given rectangle */
+	/* Find and iterate records that strictly contain given rectangle */
 	SOP_STRICT_CONTAINS,
-	/* Find and itearate records that overlaps with given rectangle */
+	/* Find and iterate records that overlaps with given rectangle */
 	SOP_OVERLAPS,
-	/* Find and itearate records that belongs to given rectangle */
+	/* Find and iterate records that belongs to given rectangle */
 	SOP_BELONGS,
-	/* Find and itearate records that strictly belongs to given rectangle */
+	/* Find and iterate records that strictly belongs to given rectangle */
 	SOP_STRICT_BELONGS,
-	/* Find and itearate nearest records from a given point (the point is
-	 * acluattly lowest_point of given rectangle). Records are iterated in
+	/* Find and iterate the nearest records from a given point (the point is
+	 * actually lowest_point of given rectangle). Records are iterated in
 	 * order of distance to given point. Yes, it is KNN iterator */
 	SOP_NEIGHBOR
 };
@@ -135,7 +135,7 @@ struct rtree
 	unsigned page_size;
 	/* Page branch size in bytes */
 	unsigned page_branch_size;
-	/* For iterator usage, pages are splitted into structs neighbours
+	/* For iterator usage, pages are split into structs neighbours
 	 * Here is number of neighbours fit into one page */
 	unsigned neighbours_in_page;
 	/* Number of records in entire tree */
@@ -165,10 +165,10 @@ struct rtree_iterator
 	enum spatial_search_op op;
 	/* Flag that means that no more values left */
 	bool eof;
-	/* A verion of a tree when the iterator was created */
+	/* A version of a tree when the iterator was created */
 	unsigned version;
 
-	/* Special rb tree of closest neqighbors
+	/* Special rb tree of closest neighbors
 	 * Used only for iteration with op = SOP_NEIGHBOR
 	 * For allocating list entries, page allocator of tree is used.
 	 * Allocated page is much bigger than list entry and thus
@@ -182,11 +182,11 @@ struct rtree_iterator
 	/* Position of ready-to-use list entry in allocated page */
 	unsigned page_pos;
 
-	/* Comparators for comparison rectagnle of the iterator with
-	 * rectangles of tree nodes. If the comparator returns true,
+	/* Comparators for comparison of iterator's rectangle with
+	 * tree nodes' rectangles . If the comparator returns true,
 	 * the node is accepted; if false - skipped.
 	 */
-	/* Comparator for interanal (not leaf) nodes of the tree */
+	/* Comparator for internal (not leaf) nodes of the tree */
 	rtree_comparator_t intr_cmp;
 	/* Comparator for leaf nodes of the tree */
 	rtree_comparator_t leaf_cmp;
@@ -312,7 +312,7 @@ rtree_debug_print(const struct rtree *tree);
 /**
  * @brief Initialize an iterator for rtree
  * Every iterator must be initialized before any usage
- * @param itr - pointer to a iterator
+ * @param itr - pointer to an iterator
  **/
 void
 rtree_iterator_init(struct rtree_iterator *itr);
@@ -320,7 +320,7 @@ rtree_iterator_init(struct rtree_iterator *itr);
 /**
  * @brief Destroy an iterator
  * Every iterator must be destroyed
- * @param itr - pointer to a iterator
+ * @param itr - pointer to an iterator
  **/
 void
 rtree_iterator_destroy(struct rtree_iterator *itr);
@@ -328,7 +328,7 @@ rtree_iterator_destroy(struct rtree_iterator *itr);
 /**
  * @brief Retrieve a record from the iterator and iterate it to the next record
  * @return a record or NULL if no more records
- * @param itr - pointer to a iterator
+ * @param itr - pointer to an iterator
  **/
 record_t
 rtree_iterator_next(struct rtree_iterator *itr);
