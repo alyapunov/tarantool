@@ -65,9 +65,18 @@ struct rtree_page {
 	struct rtree_page_branch data[];
 };
 
+enum {
+	RTREE_PAGE_HEADER_SIZE = offsetof(struct rtree_page, data[0])
+};
+
 struct rtree_neighbor_page {
 	struct rtree_neighbor_page* next;
 	struct rtree_neighbor buf[];
+};
+
+enum {
+	RTREE_NEIGHBOR_PAGE_HEADER_SIZE = offsetof(struct rtree_neighbor_page,
+						   buf[0])
 };
 
 struct rtree_reinsert_list {
@@ -956,16 +965,17 @@ rtree_init(struct rtree *tree, unsigned dimension, uint32_t extent_size,
 	tree->page_branch_size =
 		(RTREE_BRANCH_DATA_SIZE + dimension * 2 * sizeof(coord_t));
 	tree->page_size = RTREE_OPTIMAL_BRANCHES_IN_PAGE *
-		tree->page_branch_size + sizeof(int);
+		tree->page_branch_size + RTREE_PAGE_HEADER_SIZE;
 	/* round up to the lowest power of 2 */
 	int lz = __builtin_clz(tree->page_size - 1);
 	tree->page_size = 1u << (sizeof(int) * CHAR_BIT - lz);
-	assert(tree->page_size - sizeof(int) >=
+	assert(tree->page_size - RTREE_PAGE_HEADER_SIZE >=
 	       tree->page_branch_size * RTREE_OPTIMAL_BRANCHES_IN_PAGE);
-	tree->page_max_fill = (tree->page_size - sizeof(int)) /
+	tree->page_max_fill = (tree->page_size - RTREE_PAGE_HEADER_SIZE) /
 		tree->page_branch_size;
 	tree->page_min_fill = tree->page_max_fill * 2 / 5;
-	tree->neighbours_in_page = (tree->page_size - sizeof(void *))
+	tree->neighbours_in_page =
+		(tree->page_size - RTREE_NEIGHBOR_PAGE_HEADER_SIZE)
 		/ sizeof(struct rtree_neighbor);
 
 	matras_create(&tree->mtab, extent_size, tree->page_size,
