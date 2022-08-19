@@ -165,39 +165,49 @@ struct rtree_iterator
 	struct rtree_rect rect;
 	/* Type of current iteration operation */
 	enum spatial_search_op op;
-	/* Flag that means that no more values left */
-	bool eof;
 	/* A version of a tree when the iterator was created */
 	unsigned version;
 
-	/* Special rb tree of closest neighbors
-	 * Used only for iteration with op = SOP_NEIGHBOR
-	 * For allocating list entries, page allocator of tree is used.
-	 * Allocated page is much bigger than list entry and thus
-	 * provides several list entries.
-	 */
-	rtnt_t neigh_tree;
-	/* List of unused (deleted) list entries */
-	struct rtree_neighbor *neigh_free_list;
-	/* List of tree pages, allocated for list entries */
-	struct rtree_neighbor_page *page_list;
-	/* Position of ready-to-use list entry in allocated page */
-	unsigned page_pos;
+	union {
+		struct {
+			/* Flag that means that no more values left */
+			bool eof;
 
-	/* Comparators for comparison of iterator's rectangle with
-	 * tree nodes' rectangles . If the comparator returns true,
-	 * the node is accepted; if false - skipped.
-	 */
-	/* Comparator for internal (not leaf) nodes of the tree */
-	rtree_comparator_t intr_cmp;
-	/* Comparator for leaf nodes of the tree */
-	rtree_comparator_t leaf_cmp;
+			/*
+			 * Comparators for comparison of iterator's rectangle
+			 * with tree nodes' rectangles . If the comparator
+			 * returns true, the node is accepted;
+			 * if false - skipped.
+			 */
+			/* Comparator for internal nodes of the tree */
+			rtree_comparator_t intr_cmp;
+			/* Comparator for leaf nodes of the tree */
+			rtree_comparator_t leaf_cmp;
 
-	/* Current path of search in tree */
-	struct {
-		struct rtree_page *page;
-		int pos;
-	} stack[RTREE_MAX_HEIGHT];
+			/* Current path of search in tree */
+			struct stack_item {
+				struct rtree_page *page;
+				int pos;
+			} stack[RTREE_MAX_HEIGHT];
+		} simple;
+		struct {
+			/* Special rb tree of closest neighbors
+			 * Used only for iteration with op = SOP_NEIGHBOR
+			 * For allocating list entries, the page allocator of
+			 * tree is used.
+			 * Allocated page is much bigger than a list entry and
+			 * thus provides several list entries.
+			 */
+			rtnt_t tree;
+
+			/* List of unused (deleted) list entries */
+			struct rtree_neighbor *free_list;
+			/* List of tree pages, allocated for list entries */
+			struct rtree_neighbor_page *page_list;
+			/* Position of ready-to-use entry in allocated page */
+			unsigned page_pos;
+		} neigh;
+	};
 };
 
 /**
