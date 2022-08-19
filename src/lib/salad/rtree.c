@@ -731,9 +731,9 @@ rtree_iterator_goto_first(struct rtree_iterator *itr, unsigned sp,
 		for (unsigned i = 0, n = pg->n; i < n; i++) {
 			struct rtree_page_branch *b;
 			b = rtree_branch_get(itr->tree, pg, i);
-			if (itr->leaf_cmp(&itr->rect, &b->rect, d)) {
-				itr->stack[sp].page = pg;
-				itr->stack[sp].pos = i;
+			if (itr->simple.leaf_cmp(&itr->rect, &b->rect, d)) {
+				itr->simple.stack[sp].page = pg;
+				itr->simple.stack[sp].pos = i;
 				return true;
 			}
 		}
@@ -741,12 +741,12 @@ rtree_iterator_goto_first(struct rtree_iterator *itr, unsigned sp,
 		for (unsigned i = 0, n = pg->n; i < n; i++) {
 			struct rtree_page_branch *b;
 			b = rtree_branch_get(itr->tree, pg, i);
-			if (itr->intr_cmp(&itr->rect, &b->rect, d)
+			if (itr->simple.intr_cmp(&itr->rect, &b->rect, d)
 			    && rtree_iterator_goto_first(itr, sp + 1,
 							 b->data.page))
 			{
-				itr->stack[sp].page = pg;
-				itr->stack[sp].pos = i;
+				itr->simple.stack[sp].page = pg;
+				itr->simple.stack[sp].pos = i;
 				return true;
 			}
 		}
@@ -758,26 +758,26 @@ static bool
 rtree_iterator_goto_next(struct rtree_iterator *itr, unsigned sp)
 {
 	unsigned d = itr->tree->dimension;
-	struct rtree_page *pg = itr->stack[sp].page;
+	struct rtree_page *pg = itr->simple.stack[sp].page;
 	if (sp + 1 == itr->tree->height) {
-		for (unsigned i = itr->stack[sp].pos, n = pg->n; ++i < n;) {
+		for (int i = itr->simple.stack[sp].pos, n = pg->n; ++i < n;) {
 			struct rtree_page_branch *b;
 			b = rtree_branch_get(itr->tree, pg, i);
-			if (itr->leaf_cmp(&itr->rect, &b->rect, d)) {
-				itr->stack[sp].pos = i;
+			if (itr->simple.leaf_cmp(&itr->rect, &b->rect, d)) {
+				itr->simple.stack[sp].pos = i;
 				return true;
 			}
 		}
 	} else {
-		for (int i = itr->stack[sp].pos, n = pg->n; ++i < n;) {
+		for (int i = itr->simple.stack[sp].pos, n = pg->n; ++i < n;) {
 			struct rtree_page_branch *b;
 			b = rtree_branch_get(itr->tree, pg, i);
-			if (itr->intr_cmp(&itr->rect, &b->rect, d)
+			if (itr->simple.intr_cmp(&itr->rect, &b->rect, d)
 			    && rtree_iterator_goto_first(itr, sp + 1,
 							 b->data.page))
 			{
-				itr->stack[sp].page = pg;
-				itr->stack[sp].pos = i;
+				itr->simple.stack[sp].page = pg;
+				itr->simple.stack[sp].pos = i;
 				return true;
 			}
 		}
@@ -793,13 +793,13 @@ static record_t
 rtree_iterator_next_simple(struct rtree_iterator *itr)
 {
 	int sp = itr->tree->height - 1;
-	if (!itr->eof && rtree_iterator_goto_next(itr, sp)) {
-		struct rtree_page_branch *b;
-		b = rtree_branch_get(itr->tree,
-				     itr->stack[sp].page, itr->stack[sp].pos);
+	if (!itr->simple.eof && rtree_iterator_goto_next(itr, sp)) {
+		struct stack_item *st = &itr->simple.stack[sp];
+		struct rtree_page_branch *b =
+			rtree_branch_get(itr->tree, st->page, st->pos);
 		return b->data.record;
 	}
-	itr->eof = true;
+	itr->simple.eof = true;
 	return NULL;
 }
 
@@ -807,20 +807,20 @@ void
 rtree_iterator_init(struct rtree_iterator *itr)
 {
 	itr->tree = NULL;
-	rtnt_new(&itr->neigh_tree);
-	itr->neigh_free_list = NULL;
-	itr->page_list = NULL;
-	itr->page_pos = INT_MAX;
 }
 
 void
 rtree_iterator_destroy(struct rtree_iterator *itr)
 {
-	struct rtree_neighbor_page *curr, *next;
-	for (curr = itr->page_list; curr != NULL; curr = next) {
-		next = curr->next;
-		rtree_page_free((struct rtree *) itr->tree,
-				(struct rtree_page *) curr);
+	if (itr->tree == NULL)
+		return;
+	if (itr->op == SOP_NEIGHBOR) {
+		struct rtree_neighbor_page *curr, *next;
+		for (curr = itr->neigh.page_list; curr != NULL; curr = next) {
+			next = curr->next;
+			rtree_page_free((struct rtree *) itr->tree,
+					(struct rtree_page *) curr);
+		}
 	}
 }
 
@@ -841,35 +841,37 @@ rtree_iterator_reset(struct rtree_iterator *itr, const struct rtree *tree,
 	itr->op = op;
 	itr->version = tree->version;
 
-	rtnt_new(&itr->neigh_tree);
-	itr->neigh_free_list = NULL;
-	itr->page_list = NULL;
-	itr->page_pos = INT_MAX;
+	if (op == SOP_NEIGHBOR) {
+		rtnt_new(&itr->neigh.tree);
+		itr->neigh.free_list = NULL;
+		itr->neigh.page_list = NULL;
+		itr->neigh.page_pos = INT_MAX;
+	}
 }
 
 static struct rtree_neighbor *
 rtree_iterator_allocate_neighbour(struct rtree_iterator *itr)
 {
-	if (itr->page_pos >= itr->tree->neighbours_in_page) {
+	if (itr->neigh.page_pos >= itr->tree->neighbours_in_page) {
 		struct rtree_neighbor_page *new_page =
 			(struct rtree_neighbor_page *)
 			rtree_page_alloc((struct rtree*)itr->tree);
-		new_page->next = itr->page_list;
-		itr->page_list = new_page;
-		itr->page_pos = 0;
+		new_page->next = itr->neigh.page_list;
+		itr->neigh.page_list = new_page;
+		itr->neigh.page_pos = 0;
 	}
-	return itr->page_list->buf + itr->page_pos++;
+	return itr->neigh.page_list->buf + itr->neigh.page_pos++;
 }
 
 static struct rtree_neighbor *
 rtree_iterator_new_neighbor(struct rtree_iterator *itr,
 			    void *child, sq_coord_t distance, int level)
 {
-	struct rtree_neighbor *n = itr->neigh_free_list;
+	struct rtree_neighbor *n = itr->neigh.free_list;
 	if (n == NULL)
 		n = rtree_iterator_allocate_neighbour(itr);
 	else
-		itr->neigh_free_list = n->next_free;
+		itr->neigh.free_list = n->next_free;
 	n->child = child;
 	n->distance = distance;
 	n->level = level;
@@ -880,8 +882,8 @@ static void
 rtree_iterator_free_neighbor(struct rtree_iterator *itr,
 			     struct rtree_neighbor *n)
 {
-	n->next_free = itr->neigh_free_list;
-	itr->neigh_free_list = n;
+	n->next_free = itr->neigh.free_list;
+	itr->neigh.free_list = n;
 }
 
 static void
@@ -900,7 +902,7 @@ rtree_iterator_process_neigh(struct rtree_iterator *itr,
 		struct rtree_neighbor *neigh =
 			rtree_iterator_new_neighbor(itr, b->data.page,
 						    distance, level - 1);
-		rtnt_insert(&itr->neigh_tree, neigh);
+		rtnt_insert(&itr->neigh.tree, neigh);
 	}
 }
 
@@ -926,10 +928,10 @@ rtree_iterator_next_neigh(struct rtree_iterator *itr)
 	*/
 	while (true) {
 		struct rtree_neighbor *neighbor =
-			rtnt_first(&itr->neigh_tree);
+			rtnt_first(&itr->neigh.tree);
 		if (neighbor == NULL)
 			return NULL;
-		rtnt_remove(&itr->neigh_tree, neighbor);
+		rtnt_remove(&itr->neigh.tree, neighbor);
 		if (neighbor->level == 0) {
 			void *child = neighbor->child;
 			rtree_iterator_free_neighbor(itr, neighbor);
@@ -1084,41 +1086,44 @@ rtree_search_simple(struct rtree_iterator *itr)
 	assert(itr->op != SOP_NEIGHBOR);
 	const struct rtree *tree = itr->tree;
 
+	rtree_comparator_t *intr_cmp = &itr->simple.intr_cmp;
+	rtree_comparator_t *leaf_cmp = &itr->simple.leaf_cmp;
+
 	switch (itr->op) {
 	case SOP_ALL:
-		itr->intr_cmp = itr->leaf_cmp = rtree_always_true;
+		*intr_cmp = *leaf_cmp = rtree_always_true;
 		break;
 	case SOP_EQUALS:
-		itr->intr_cmp = rtree_rect_in_rect;
-		itr->leaf_cmp = rtree_rect_equal_to_rect;
+		*intr_cmp = rtree_rect_in_rect;
+		*leaf_cmp = rtree_rect_equal_to_rect;
 		break;
 	case SOP_CONTAINS:
-		itr->intr_cmp = itr->leaf_cmp = rtree_rect_in_rect;
+		*intr_cmp = *leaf_cmp = rtree_rect_in_rect;
 		break;
 	case SOP_STRICT_CONTAINS:
-		itr->intr_cmp = itr->leaf_cmp = rtree_rect_strict_in_rect;
+		*intr_cmp = *leaf_cmp = rtree_rect_strict_in_rect;
 		break;
 	case SOP_OVERLAPS:
-		itr->intr_cmp = itr->leaf_cmp = rtree_rect_intersects_rect;
+		*intr_cmp = *leaf_cmp = rtree_rect_intersects_rect;
 		break;
 	case SOP_BELONGS:
-		itr->intr_cmp = rtree_rect_intersects_rect;
-		itr->leaf_cmp = rtree_rect_holds_rect;
+		*intr_cmp = rtree_rect_intersects_rect;
+		*leaf_cmp = rtree_rect_holds_rect;
 		break;
 	case SOP_STRICT_BELONGS:
-		itr->intr_cmp = rtree_rect_intersects_rect;
-		itr->leaf_cmp = rtree_rect_strict_holds_rect;
+		*intr_cmp = rtree_rect_intersects_rect;
+		*leaf_cmp = rtree_rect_strict_holds_rect;
 		break;
 	default:
 		unreachable();
 	}
 	if (tree->root && rtree_iterator_goto_first(itr, 0, tree->root)) {
-		itr->stack[tree->height-1].pos -= 1;
+		itr->simple.stack[tree->height-1].pos -= 1;
 		/* will be incremented by goto_next */
-		itr->eof = false;
+		itr->simple.eof = false;
 		return true;
 	} else {
-		itr->eof = true;
+		itr->simple.eof = true;
 		return false;
 	}
 }
@@ -1141,7 +1146,7 @@ rtree_search_neigh(struct rtree_iterator *itr)
 			rtree_iterator_new_neighbor(itr, tree->root,
 						    distance,
 						    tree->height);
-		rtnt_insert(&itr->neigh_tree, n);
+		rtnt_insert(&itr->neigh.tree, n);
 		return true;
 	} else {
 		return false;
@@ -1197,7 +1202,7 @@ size_t
 rtree_iterator_neigh_tree_size(struct rtree_iterator *itr)
 {
 	size_t size = 0;
-	rtnt_iter(&itr->neigh_tree, NULL,
+	rtnt_iter(&itr->neigh.tree, NULL,
 		  rtree_iterator_neigh_tree_size_cb, &size);
 	return size;
 }
