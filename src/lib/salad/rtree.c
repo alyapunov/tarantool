@@ -1149,28 +1149,52 @@ rtree_number_of_records(const struct rtree *tree) {
 	return tree->n_records;
 }
 
+static struct rtree_neighbor *
+rtree_iterator_neigh_tree_size_cb(rtnt_t *tree, struct rtree_neighbor *node,
+				  void *size)
+{
+	(void)tree;
+	(void)node;
+	(*(size_t *)size)++;
+	return NULL;
+}
+
+size_t
+rtree_iterator_neigh_tree_size(struct rtree_iterator *itr)
+{
+	size_t size = 0;
+	rtnt_iter(&itr->neigh_tree, NULL,
+		  rtree_iterator_neigh_tree_size_cb, &size);
+	return size;
+}
+
 #if 0
 #include <stdio.h>
 void
 rtree_debug_print_page(const struct rtree *tree, const struct rtree_page *page,
-		       unsigned level, unsigned path)
+		       unsigned level, unsigned long path)
 {
-	printf("%d:\n", path);
+	if (page == tree->root)
+		printf("Root node:\n");
+	else
+		printf("Node %lu:\n", path);
 	unsigned d = tree->dimension;
-	for (int i = 0; i < page->n; i++) {
+	for (unsigned i = 0; i < page->n; i++) {
 		struct rtree_page_branch *b;
 		b = rtree_branch_get(tree, page, i);
-		double v = 1;
 		for (unsigned j = 0; j < d; j++) {
 			double d1 = b->rect.coords[j * 2];
 			double d2 = b->rect.coords[j * 2 + 1];
-			v *= (d2 - d1) / 100;
-			printf("[%04.1lf-%04.1lf:%04.1lf]", d2, d1, d2 - d1);
+			printf("[%5lf-%5lf]", d1, d2);
 		}
-		printf("%d\n", (int)(v * 100));
+		if (level > 0)
+			printf(" -> node %lu\n", path * 100 + i + 1);
+		else
+			printf(" -> value %p\n", b->data.record);
 	}
-	if (--level > 1) {
-		for (int i = 0; i < page->n; i++) {
+	if (level > 0) {
+		--level;
+		for (unsigned i = 0; i < page->n; i++) {
 			struct rtree_page_branch *b;
 			b = rtree_branch_get(tree, page, i);
 			rtree_debug_print_page(tree, b->data.page, level,
@@ -1182,8 +1206,9 @@ rtree_debug_print_page(const struct rtree *tree, const struct rtree_page *page,
 void
 rtree_debug_print(const struct rtree *tree)
 {
+	printf("rtree if height %u:\n", tree->height);
 	if (tree->root)
-		rtree_debug_print_page(tree, tree->root, tree->height, 1);
+		rtree_debug_print_page(tree, tree->root, tree->height - 1, 1);
 }
 #endif
 

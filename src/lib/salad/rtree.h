@@ -333,6 +333,16 @@ rtree_iterator_destroy(struct rtree_iterator *itr);
 record_t
 rtree_iterator_next(struct rtree_iterator *itr);
 
+/**
+ * @brief Size of internal neighbor tree
+ * Should be used for debug purposes only. The function's complexity is O(N).
+ * Can be removed in further versions of rtree.
+ * @return Size of internal iterator tree or 0 if not applicable
+ * @param itr - pointer to an iterator
+ */
+size_t
+rtree_iterator_neigh_tree_size(struct rtree_iterator *itr);
+
 #if defined(__cplusplus)
 } /* extern "C" { */
 #endif /* defined(__cplusplus) */
