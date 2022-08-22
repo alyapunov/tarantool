@@ -40,19 +40,30 @@ constexpr static std::size_t TUPLE_COUNT_MULTIPLIER = 10;
 
 ////////////////////////////// Data Definitions ////////////////////////////////////////////////////////////////////////
 
-// 'size' can be skipped in fact (since it is the same for all tuples).
-// Let's keep it just in case (and to make benchmark look a bit more closer
-// to real world). In order to compare two TupleRaw we use memcpy.
-struct TupleRaw {
-	TupleRaw(char *ptr, std::size_t len) :
-		data(ptr), size(len) { }
-	char *data;
-	std::size_t size;
-};
-
 using Key_t   = uint32_t;
 using Hash_t  = uint32_t;
-using Value_t = TupleRaw;
+
+// 'size' can be skipped in fact (since it is the same for all tuples).
+// Let's keep it just in case (and to make benchmark look a bit closer
+// to real world). In order to compare two TupleRaw we use memcmp.
+struct TupleRaw {
+	std::size_t size;
+	char data[TUPLE_SIZE];
+	bool operator==(const TupleRaw &a) const
+	{
+		return std::memcmp(data, a.data, size) == 0;
+	}
+	Key_t key() const
+	{
+		Key_t me;
+		memcpy(&me, data, sizeof(me));
+		return me;
+	}
+	bool operator==(Key_t a) const
+	{
+		return key() == a;
+	}
+};
 
 // Light hash map implementation does not include any hashing function;
 // it's up to user to choose the proper one. Let's use quite primitive
@@ -75,43 +86,60 @@ namespace Hash {
 
 // Wrapper to move hash calculation to setup stage (in order to make
 // performance benchmark results cleaner).
-struct Tuple {
-	Tuple(char *ptr, std::size_t len, Key_t key) :
-		raw(ptr, len), key(key), hash(Hash::FNV_hash(ptr, len)) { }
-	Value_t raw;
-	Key_t key;
+// Also, for data simplicity of data generation extracted key is stored
+// here. Note that the hash table must not use this key, it is only
+// for benchmarks.
+struct TupleRef {
+	TupleRef(const TupleRaw *t) :
+		tuple(t), hash(Hash::FNV_hash(t->data, t->size)), key(t->key())
+	{
+	}
+	const TupleRaw *tuple;
 	Hash_t hash;
+	Key_t key;
 };
 
-namespace Hash {
-	// Since std::unordered_set does not provide an ability to specify
-	// hash value beforehand, let's use struct Tuple as values with
-	// pre-calculated hashes (yes, unordered_set stores hash values on its
-	// own but we have nothing left to do here to make it closer to
-	// Light bench).
-	struct TupleHash {
-		std::size_t operator()(const Tuple &t) const
-		{
-			return t.hash;
-		}
-	};
-}
+// Since std::unordered_set does not provide an ability to specify
+// hash value beforehand, let's use struct Tuple as values with
+// pre-calculated hashes (yes, unordered_set stores hash values on its
+// own but we have nothing left to do here to make it closer to
+// Light bench).
+struct TupleHash {
+	std::size_t operator()(const TupleRef &t) const noexcept
+	{
+		return t.hash;
+	}
+};
 
 struct TupleEqual
 {
-	bool operator()(const Tuple &lhs, const Tuple &rhs) const noexcept
+	bool operator()(const TupleRef &lhs, const TupleRef &rhs) const noexcept
 	{
-		return std::memcmp(lhs.raw.data, rhs.raw.data, lhs.raw.size) == 0;
+		return *lhs.tuple == *rhs.tuple;
 	}
 };
 
 // Simple generator of uniformly distributed random bytes.
 struct RandomBytesGenerator {
-	RandomBytesGenerator() :
-		gen(std::random_device()()), distr(0, UCHAR_MAX) { }
-	unsigned char get() { return distr(gen); }
-	std::mt19937 gen;
-	std::uniform_int_distribution<unsigned short> distr;
+	RandomBytesGenerator() : gen(std::random_device()()) { }
+	void prebuf()
+	{
+		using rand_t = std::mt19937_64::result_type;
+		static_assert(sizeof(buf) % sizeof(rand_t) == 0, "wtf");
+		for (pos = 0; pos < sizeof(buf); pos += sizeof(rand_t)) {
+			rand_t r = gen();
+			memcpy(&buf[pos], &r, sizeof(r));
+		}
+	}
+	unsigned char get()
+	{
+		if (pos == 0)
+			prebuf();
+		return buf[--pos];
+	}
+	unsigned char buf[1024];
+	size_t pos = 0;
+	std::mt19937_64 gen;
 };
 
 // Large chunk of continuous memory initialized with random bytes.
@@ -119,16 +147,15 @@ struct TupleHolder {
 	TupleHolder(std::size_t tuple_count)
 	{
 		storage.resize(tuple_count);
-		for (auto& tuple_data : storage) {
-			for (char &c : tuple_data)
-				c = TupleHolder::random_generator.get();
+		for (auto& tuple : storage) {
+			tuple.size = TUPLE_SIZE;
+			for (char &c : tuple.data)
+				c = random_generator.get();
 		}
+		tuples.clear();
 		tuples.reserve(tuple_count);
-		for (std::size_t i = 0; i < tuple_count; ++i) {
-			Key_t key;
-			memcpy(&key, storage[i].data(), sizeof(key));
-			tuples.emplace_back(storage[i].data(), TUPLE_SIZE, key);
-		}
+		for (std::size_t i = 0; i < tuple_count; ++i)
+			tuples.emplace_back(&storage[i]);
 	}
 
 	void shuffle()
@@ -141,8 +168,8 @@ struct TupleHolder {
 	TupleHolder(const TupleHolder &) = delete;
 	TupleHolder(TupleHolder &&) = delete;
 
-	std::vector<std::array<char, TUPLE_SIZE>> storage;
-	std::vector<Tuple> tuples;
+	std::vector<TupleRaw> storage;
+	std::vector<TupleRef> tuples;
 	static RandomBytesGenerator random_generator;
 };
 
@@ -152,18 +179,16 @@ RandomBytesGenerator TupleHolder::random_generator{};
 
 namespace {
 	bool
-	value_equals(Value_t v1, Value_t v2)
+	tuple_equals(const TupleRaw *t1, const TupleRaw *t2)
 	{
-		assert(v2.size == v1.size);
-		return std::memcmp(v1.data, v2.data, v1.size) == 0;
+		assert(t2->size == t1->size);
+		return *t1 == *t2;
 	}
 
 	bool
-	key_equals(Value_t k1, Key_t k2)
+	key_equals(const TupleRaw *t1, Key_t k2)
 	{
-		Key_t key;
-		memcpy(&key, k1.data, sizeof(key));
-		return key == k2;
+		return *t1 == k2;
 	}
 
 	enum {
@@ -193,10 +218,10 @@ namespace {
 }; // namespace
 
 #define LIGHT_NAME
-#define LIGHT_DATA_TYPE Value_t
+#define LIGHT_DATA_TYPE const TupleRaw *
 #define LIGHT_KEY_TYPE Key_t
 #define LIGHT_CMP_ARG_TYPE int
-#define LIGHT_EQUAL(a, b, arg) value_equals(a, b)
+#define LIGHT_EQUAL(a, b, arg) tuple_equals(a, b)
 #define LIGHT_EQUAL_KEY(a, b, arg) key_equals(a, b)
 
 #include "salad/light.h"
@@ -204,20 +229,22 @@ namespace {
 ////////////////////////////// Fixture /////////////////////////////////////////////////////////////////////////////////
 
 template<typename T>
-class HashTableFixture : public ::benchmark::Fixture {
+class HTBench : public ::benchmark::Fixture {
 protected:
 	void
-	Fill(std::vector<Tuple>::iterator &&begin, std::vector<Tuple>::iterator &&end) noexcept
+	Fill(std::vector<TupleRef>::iterator&& begin,
+	     std::vector<TupleRef>::iterator&& end) noexcept
 	{
 		std::for_each(begin, end,
-			[this](const Tuple &t){ hash_table.insert(t); });
+			[this](const TupleRef &t){ hash_table.insert(t); });
 	}
 
 	void
-	Erase(std::vector<Tuple>::iterator &&begin, std::vector<Tuple>::iterator &&end) noexcept
+	Erase(std::vector<TupleRef>::iterator&& begin,
+	      std::vector<TupleRef>::iterator&& end) noexcept
 	{
 		std::for_each(begin, end,
-			[this](const Tuple &t){ hash_table.erase(t); });
+			[this](const TupleRef &t){ hash_table.erase(t); });
 	}
 
 	// It is required to cleanup the whole table between state iterations
@@ -448,47 +475,47 @@ protected:
 	T hash_table;
 };
 
-class LightAdapter {
+class Light {
 public:
-	LightAdapter()
+	Light()
 	{
 		light_create(&ht, light_extent_size, light_malloc_extend,
 			     light_free_extend, &extents_count, 0);
 	}
-	~LightAdapter()
+	~Light()
 	{
 		light_destroy(&ht);
 	}
 
 	// Functions return smth in order to suppress "error: invalid use of void expression".
 	int
-	erase(const Tuple &tuple)
+	erase(const TupleRef &ref)
 	{
-		light_delete_value(&ht, tuple.hash, tuple.raw);
+		light_delete_value(&ht, ref.hash, ref.tuple);
 		return 0;
 	}
 
 	int
-	insert(const Tuple &tuple)
+	insert(const TupleRef &ref)
 	{
-		light_insert(&ht, tuple.hash, tuple.raw);
+		light_insert(&ht, ref.hash, ref.tuple);
 		return 0;
 	}
 
-	TupleRaw
-	find(const Tuple &tuple)
+	const TupleRaw *
+	find(const TupleRef &ref)
 	{
-		static TupleRaw DUMMY{nullptr, 0};
-		uint32_t slot = light_find(&ht, tuple.hash, tuple.raw);
+		static TupleRaw DUMMY{0};
+		uint32_t slot = light_find(&ht, ref.hash, ref.tuple);
 		if (slot != light_end)
 			return light_get(&ht, slot);
-		return DUMMY;
+		return &DUMMY;
 	}
 
 	uint32_t
-	find_key(const Tuple &tuple)
+	find_key(const TupleRef &ref)
 	{
-		return light_find_key(&ht, tuple.hash, tuple.key);
+		return light_find_key(&ht, ref.hash, ref.key);
 	}
 
 	void
@@ -508,9 +535,9 @@ public:
 		std::size_t processed = 0;
 		struct light_iterator iter;
 		light_iterator_begin(&ht, &iter);
-		Value_t *p = nullptr;
+		const TupleRaw **p = nullptr;
 		while ((p = light_iterator_get_and_next(&ht, &iter)) != nullptr) {
-			benchmark::DoNotOptimize(p->data);
+			benchmark::DoNotOptimize((*p)->data);
 			processed++;
 		}
 		return processed;
@@ -519,14 +546,14 @@ private:
 	struct light_core ht;
 };
 
-using USet = std::unordered_set<Tuple, Hash::TupleHash, TupleEqual>;
+using USet = std::unordered_set<TupleRef, TupleHash, TupleEqual>;
 
-class STLAdapter {
+class STL {
 public:
-	auto erase(const Tuple &tuple) { return ht.erase(tuple); }
-	auto insert(const Tuple &tuple) { return ht.insert(tuple); }
-	auto find(const Tuple &tuple) { return ht.find(tuple); }
-	auto find_key(const Tuple &tuple) { return ht.find(tuple); }
+	auto erase(const TupleRef &tuple) { return ht.erase(tuple); }
+	auto insert(const TupleRef &tuple) { return ht.insert(tuple); }
+	auto find(const TupleRef &tuple) { return ht.find(tuple); }
+	auto find_key(const TupleRef &tuple) { return ht.find(tuple); }
 	void clear() { ht.clear(); }
 	void reserve(std::size_t n) { ht.reserve(n); }
 
@@ -535,7 +562,7 @@ public:
 	{
 		std::size_t processed = 0;
 		for (const auto itr : ht) {
-			benchmark::DoNotOptimize(itr.raw);
+			benchmark::DoNotOptimize(itr.tuple);
 			processed++;
 		}
 		return processed;
@@ -546,17 +573,17 @@ private:
 };
 
 #define BENCHMARK_TEMPLATE_REGISTER(METHOD_NAME, HASH_TABLE_NANE, STORAGE) \
-	BENCHMARK_TEMPLATE_DEFINE_F(HashTableFixture, HASH_TABLE_NANE##METHOD_NAME, STORAGE)(benchmark::State& state) \
-	{ HashTableFixture::METHOD_NAME(state); } \
-	BENCHMARK_REGISTER_F(HashTableFixture, HASH_TABLE_NANE##METHOD_NAME)-> \
+	BENCHMARK_TEMPLATE_DEFINE_F(HTBench, HASH_TABLE_NANE##METHOD_NAME, STORAGE)(benchmark::State& state) \
+	{ HTBench::METHOD_NAME(state); } \
+	BENCHMARK_REGISTER_F(HTBench, HASH_TABLE_NANE##METHOD_NAME)-> \
 		RangeMultiplier(TUPLE_COUNT_MULTIPLIER)-> \
 			Range(TUPLE_COUNT_MIN, TUPLE_COUNT_MAX)
 
 #define BENCHMARK_TEMPLATE_REGISTER_LIGHT(METHOD_NAME) \
-	BENCHMARK_TEMPLATE_REGISTER(METHOD_NAME, Light, LightAdapter)
+	BENCHMARK_TEMPLATE_REGISTER(METHOD_NAME, Light, Light)
 
 #define BENCHMARK_TEMPLATE_REGISTER_STL(METHOD_NAME) \
-	BENCHMARK_TEMPLATE_REGISTER(METHOD_NAME, STL, STLAdapter)
+	BENCHMARK_TEMPLATE_REGISTER(METHOD_NAME, STL, STL)
 
 #define BENCHMARK_TEMPLATE_REGISTER_FOR_ALL_IMPLS(METHOD_NAME) \
 	BENCHMARK_TEMPLATE_REGISTER_LIGHT(METHOD_NAME); \
