@@ -77,6 +77,7 @@ struct rtree_neighbor_page {
 };
 
 enum {
+	RTREE_NEIGHBOR_PAGE_SIZE = 16 * 1024,
 	RTREE_NEIGHBOR_PAGE_HEADER_SIZE = offsetof(struct rtree_neighbor_page,
 						   buf[0])
 };
@@ -812,8 +813,7 @@ rtree_iterator_destroy(struct rtree_iterator *itr)
 		struct rtree_neighbor_page *curr, *next;
 		for (curr = itr->neigh.page_list; curr != NULL; curr = next) {
 			next = curr->next;
-			rtree_page_free((struct rtree *) itr->tree,
-					(struct rtree_page *) curr);
+			free(curr);
 		}
 	}
 }
@@ -846,7 +846,7 @@ rtree_iterator_allocate_neighbour(struct rtree_iterator *itr)
 	if (itr->neigh.page_pos >= itr->tree->neighbours_in_page) {
 		struct rtree_neighbor_page *new_page =
 			(struct rtree_neighbor_page *)
-			rtree_page_alloc((struct rtree*)itr->tree);
+			xmalloc(RTREE_NEIGHBOR_PAGE_SIZE);
 		new_page->next = itr->neigh.page_list;
 		itr->neigh.page_list = new_page;
 		itr->neigh.page_pos = 0;
@@ -974,7 +974,7 @@ rtree_init(struct rtree *tree, unsigned dimension, uint32_t extent_size,
 		tree->page_branch_size;
 	tree->page_min_fill = tree->page_max_fill * 2 / 5;
 	tree->neighbours_in_page =
-		(tree->page_size - RTREE_NEIGHBOR_PAGE_HEADER_SIZE)
+		(RTREE_NEIGHBOR_PAGE_SIZE - RTREE_NEIGHBOR_PAGE_HEADER_SIZE)
 		/ sizeof(struct rtree_neighbor);
 
 	matras_create(&tree->mtab, extent_size, tree->page_size,
