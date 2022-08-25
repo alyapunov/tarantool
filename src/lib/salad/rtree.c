@@ -822,18 +822,6 @@ rtree_iterator_destroy(struct rtree_iterator *itr)
 		rtree_page_free((struct rtree *) itr->tree,
 				(struct rtree_page *) curr);
 	}
-	itr->page_list = NULL;
-	itr->page_pos = INT_MAX;
-}
-
-struct rtree_neighbor *
-rtree_iterator_reset_cb(rtnt_t *t, struct rtree_neighbor *n, void *d)
-{
-	(void) t;
-	struct rtree_iterator *itr = (struct rtree_iterator *)d;
-	n->next = itr->neigh_free_list;
-	itr->neigh_free_list = n;
-	return 0;
 }
 
 /**
@@ -846,13 +834,17 @@ rtree_iterator_reset(struct rtree_iterator *itr, const struct rtree *tree,
 	assert(itr->tree == NULL || itr->tree == tree);
 	assert(tree->height <= RTREE_MAX_HEIGHT);
 
-	rtnt_iter(&itr->neigh_tree, 0, rtree_iterator_reset_cb, (void *)itr);
-	rtnt_new(&itr->neigh_tree);
+	rtree_iterator_destroy(itr);
 
 	itr->tree = tree;
 	rtree_rect_copy(&itr->rect, rect, tree->dimension);
 	itr->op = op;
 	itr->version = tree->version;
+
+	rtnt_new(&itr->neigh_tree);
+	itr->neigh_free_list = NULL;
+	itr->page_list = NULL;
+	itr->page_pos = INT_MAX;
 }
 
 static struct rtree_neighbor *
@@ -877,7 +869,7 @@ rtree_iterator_new_neighbor(struct rtree_iterator *itr,
 	if (n == NULL)
 		n = rtree_iterator_allocate_neighbour(itr);
 	else
-		itr->neigh_free_list = n->next;
+		itr->neigh_free_list = n->next_free;
 	n->child = child;
 	n->distance = distance;
 	n->level = level;
@@ -888,7 +880,7 @@ static void
 rtree_iterator_free_neighbor(struct rtree_iterator *itr,
 			     struct rtree_neighbor *n)
 {
-	n->next = itr->neigh_free_list;
+	n->next_free = itr->neigh_free_list;
 	itr->neigh_free_list = n;
 }
 

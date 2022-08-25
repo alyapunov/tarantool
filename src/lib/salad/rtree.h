@@ -55,8 +55,12 @@ extern "C" {
 #endif /* defined(__cplusplus) */
 
 struct rtree_neighbor {
-	rb_node(struct rtree_neighbor) link;
-	struct rtree_neighbor *next;
+	union {
+		/** Link in rtree_iterator->neigh_tree. */
+		rb_node(struct rtree_neighbor) link;
+		/** Link in single-linked rtree_iterator->neigh_free_list. */
+		struct rtree_neighbor *next_free;
+	};
 	void *child;
 	int level;
 	sq_coord_t distance;
