@@ -41,6 +41,14 @@
  * In-memory Guttman's R-tree
  */
 
+enum {
+	/* rtree will try to determine optimal page size */
+	RTREE_OPTIMAL_BRANCHES_IN_PAGE = 18,
+	/* actual number of branches could be up to double of the previous
+	 * constant */
+	RTREE_MAXIMUM_BRANCHES_IN_PAGE = RTREE_OPTIMAL_BRANCHES_IN_PAGE * 2
+};
+
 /* Type of payload data */
 typedef void *record_t;
 /* Type of coordinate */
@@ -54,6 +62,12 @@ typedef double area_t;
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+struct rtree_page;
+
+/**
+ * Auxiliary structure for SOP_NEIGHBOR search. Used for ordering of rtree
+ * pages by the distance for the search point.
+ */
 struct rtree_neighbor {
 	union {
 		/** Link in rtree_iterator->neigh_tree. */
@@ -61,9 +75,22 @@ struct rtree_neighbor {
 		/** Link in single-linked rtree_iterator->neigh_free_list. */
 		struct rtree_neighbor *next_free;
 	};
-	void *child;
-	int level;
+	/** Rtree page that this object represents. */
+	struct rtree_page *page;
+	/** Current distance from the search point. */
 	sq_coord_t distance;
+	/*
+	 * Level of the page, counted from leafs. Since leaf pages (which have
+	 * level 0) are never stored as neighbors, this member is 1 or greater.
+	 */
+	uint8_t level;
+
+	uint8_t current_branch;
+	/*
+	 * Indexes of branches in the page, ordered by distance from the
+	 * search point, descending.
+	 */
+	uint8_t branch_order[RTREE_MAXIMUM_BRANCHES_IN_PAGE];
 };
 
 typedef rb_tree(struct rtree_neighbor) rtnt_t;
