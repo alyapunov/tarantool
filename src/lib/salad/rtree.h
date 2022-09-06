@@ -41,6 +41,14 @@
  * In-memory Guttman's R-tree
  */
 
+enum {
+	/* rtree will try to determine optimal page size */
+	RTREE_OPTIMAL_BRANCHES_IN_PAGE = 18,
+	/* actual number of branches could be up to double of the previous
+	 * constant */
+	RTREE_MAXIMUM_BRANCHES_IN_PAGE = RTREE_OPTIMAL_BRANCHES_IN_PAGE * 2
+};
+
 /* Type of payload data */
 typedef void *record_t;
 /* Type of coordinate */
@@ -54,14 +62,18 @@ typedef double area_t;
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+struct rtree_page;
+
 struct rtree_neighbor {
 	union {
 		rb_node(struct rtree_neighbor) link;
 		struct rtree_neighbor *next_free;
 	};
-	void *child;
-	int level;
+	struct rtree_page *page;
 	sq_coord_t distance;
+	uint8_t level;
+	uint8_t current_branch;
+	uint8_t branch_order[RTREE_MAXIMUM_BRANCHES_IN_PAGE];
 };
 
 typedef rb_tree(struct rtree_neighbor) rtnt_t;

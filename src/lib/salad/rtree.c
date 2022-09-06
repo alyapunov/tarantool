@@ -40,14 +40,6 @@
 /*------------------------------------------------------------------------- */
 /* R-tree internal structures definition */
 /*------------------------------------------------------------------------- */
-enum {
-	/* rtree will try to determine optimal page size */
-	RTREE_OPTIMAL_BRANCHES_IN_PAGE = 18,
-	/* actual number of branches could be up to double of the previous
-	 * constant */
-	RTREE_MAXIMUM_BRANCHES_IN_PAGE = RTREE_OPTIMAL_BRANCHES_IN_PAGE * 2
-};
-
 struct rtree_page_branch {
 	union {
 		struct rtree_page *page;
@@ -843,6 +835,11 @@ rtree_iterator_reset(struct rtree_iterator *itr, const struct rtree *tree,
 static struct rtree_neighbor *
 rtree_iterator_allocate_neighbour(struct rtree_iterator *itr)
 {
+	if (itr->neigh.free_list != NULL) {
+		struct rtree_neighbor *n = itr->neigh.free_list;
+		itr->neigh.free_list = n->next_free;
+		return n;
+	}
 	if (itr->neigh.page_pos >= itr->tree->neighbours_in_page) {
 		struct rtree_neighbor_page *new_page =
 			(struct rtree_neighbor_page *)
@@ -854,21 +851,6 @@ rtree_iterator_allocate_neighbour(struct rtree_iterator *itr)
 	return itr->neigh.page_list->buf + itr->neigh.page_pos++;
 }
 
-static struct rtree_neighbor *
-rtree_iterator_new_neighbor(struct rtree_iterator *itr,
-			    void *child, sq_coord_t distance, int level)
-{
-	struct rtree_neighbor *n = itr->neigh.free_list;
-	if (n == NULL)
-		n = rtree_iterator_allocate_neighbour(itr);
-	else
-		itr->neigh.free_list = n->next_free;
-	n->child = child;
-	n->distance = distance;
-	n->level = level;
-	return n;
-}
-
 static void
 rtree_iterator_free_neighbor(struct rtree_iterator *itr,
 			     struct rtree_neighbor *n)
@@ -877,24 +859,101 @@ rtree_iterator_free_neighbor(struct rtree_iterator *itr,
 	itr->neigh.free_list = n;
 }
 
+struct rtree_branch_order {
+	sq_coord_t distance;
+	uint8_t order;
+};
+
 static void
-rtree_iterator_process_neigh(struct rtree_iterator *itr,
-			     struct rtree_neighbor *neighbor)
+rtree_branch_order_sort_desc(struct rtree_branch_order *order, unsigned count)
 {
-	void *child = neighbor->child;
-	struct rtree_page *pg = (struct rtree_page *)child;
-	int level = neighbor->level;
-	rtree_iterator_free_neighbor(itr, neighbor);
-	for (int i = 0, n = pg->n; i < n; i++) {
-		struct rtree_page_branch *b;
-		b = rtree_branch_get(itr->tree, pg, i);
-		sq_coord_t distance =
-			rtree_rect_distance(itr->tree, &b->rect, &itr->rect);
-		struct rtree_neighbor *neigh =
-			rtree_iterator_new_neighbor(itr, b->data.page,
-						    distance, level - 1);
-		rtnt_insert(&itr->neigh.tree, neigh);
+	while (count > 1) {
+		unsigned min_i = 0;
+		sq_coord_t min_distance = order[0].distance;
+		for (unsigned j = 1; j < count; j++) {
+			if (order[j].distance < min_distance) {
+				min_i = j;
+				min_distance = order[j].distance;
+			}
+		}
+		count--;
+		if (min_i != count) {
+			struct rtree_branch_order tmp = order[min_i];
+			memmove(order + min_i, order + min_i + 1,
+				(count - min_i) * sizeof(order[0]));
+			order[count] = tmp;
+		}
 	}
+}
+
+static void
+rtree_iterator_neigh_add_page(struct rtree_iterator *itr,
+			      struct rtree_page *page, uint8_t page_level)
+{
+	_Static_assert(RTREE_MAXIMUM_BRANCHES_IN_PAGE <= UINT8_MAX, "Overflow");
+	assert(page->n <= RTREE_MAXIMUM_BRANCHES_IN_PAGE);
+
+	struct rtree_branch_order order[RTREE_MAXIMUM_BRANCHES_IN_PAGE];
+
+	unsigned low = 0;
+	unsigned high = page->n;
+	for (unsigned i = 0; i < page->n; i++) {
+		struct rtree_page_branch *b =
+			rtree_branch_get(itr->tree, page, i);
+		sq_coord_t distance = rtree_rect_distance(itr->tree, &b->rect,
+							  &itr->rect);
+		if (distance == 0) {
+			high--;
+			order[high].order = i;
+			order[high].distance = distance;
+		} else {
+			order[low].order = i;
+			order[low].distance = distance;
+			low++;
+		}
+	}
+	assert(low == high);
+	rtree_branch_order_sort_desc(order, low);
+
+	struct rtree_neighbor *neigh = rtree_iterator_allocate_neighbour(itr);
+	neigh->page = page;
+	neigh->level = page_level;
+	neigh->current_branch = page->n - 1;
+	neigh->distance = order[page->n - 1].distance;
+	for (unsigned i = 0; i < page->n; i++)
+		neigh->branch_order[i] = order[i].order;
+
+	rtnt_insert(&itr->neigh.tree, neigh);
+}
+
+static struct rtree_page_branch *
+rtree_iterator_neigh_get_current_branch(struct rtree_iterator *itr,
+					struct rtree_neighbor *neigh)
+{
+	uint8_t branch_no = neigh->branch_order[neigh->current_branch];
+	return rtree_branch_get(itr->tree, neigh->page, branch_no);
+}
+
+static struct rtree_page_branch *
+rtree_iterator_neigh_withdraw_current_branch(struct rtree_iterator *itr,
+					     struct rtree_neighbor *neigh)
+{
+	struct rtree_page_branch *curr_branch =
+		rtree_iterator_neigh_get_current_branch(itr, neigh);
+
+	rtnt_remove(&itr->neigh.tree, neigh);
+	if (neigh->current_branch > 0) {
+		neigh->current_branch--;
+		struct rtree_page_branch *b =
+			rtree_iterator_neigh_get_current_branch(itr, neigh);
+		neigh->distance =
+			rtree_rect_distance(itr->tree, &b->rect, &itr->rect);
+		rtnt_insert(&itr->neigh.tree, neigh);
+	} else {
+		rtree_iterator_free_neighbor(itr, neigh);
+	}
+
+	return curr_branch;
 }
 
 static record_t
@@ -915,18 +974,18 @@ rtree_iterator_next_neigh(struct rtree_iterator *itr)
 	 *      page and insert them in sorted list
 	*/
 	while (true) {
-		struct rtree_neighbor *neighbor =
-			rtnt_first(&itr->neigh.tree);
-		if (neighbor == NULL)
+		struct rtree_neighbor *neigh = rtnt_first(&itr->neigh.tree);
+		if (neigh == NULL)
 			return NULL;
-		rtnt_remove(&itr->neigh.tree, neighbor);
-		if (neighbor->level == 0) {
-			void *child = neighbor->child;
-			rtree_iterator_free_neighbor(itr, neighbor);
-			return (record_t)child;
-		} else {
-			rtree_iterator_process_neigh(itr, neighbor);
-		}
+		uint8_t page_level = neigh->level;
+		struct rtree_page_branch *b =
+			rtree_iterator_neigh_withdraw_current_branch(itr, neigh);
+
+		if (page_level == 1)
+			return b->data.record;
+		else
+			rtree_iterator_neigh_add_page(itr, b->data.page,
+						      page_level - 1);
 	}
 }
 
@@ -1117,17 +1176,9 @@ rtree_search_neigh(struct rtree_iterator *itr)
 {
 	assert(itr->op == SOP_NEIGHBOR);
 	const struct rtree *tree = itr->tree;
-	const struct rtree_rect *rect = &itr->rect;
 
 	if (tree->root) {
-		struct rtree_rect cover;
-		rtree_page_cover(tree, tree->root, &cover);
-		sq_coord_t distance = rtree_rect_distance(tree, &cover, rect);
-		struct rtree_neighbor *n =
-			rtree_iterator_new_neighbor(itr, tree->root,
-						    distance,
-						    tree->height);
-		rtnt_insert(&itr->neigh.tree, n);
+		rtree_iterator_neigh_add_page(itr, tree->root, tree->height);
 		return true;
 	} else {
 		return false;
