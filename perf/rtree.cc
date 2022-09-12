@@ -16,7 +16,7 @@ static constexpr size_t SIZE_MULTIPLIER = 10;
 /* Standard matras extent size. */
 static constexpr size_t EXTENT_SIZE = 16 * 1024;
 /* Number of iteration of select iterator. */
-static constexpr size_t SELECT_LIMIT = 100;
+static constexpr size_t SELECT_LIMIT = 10;
 
 //////////////////// Debug stat printer ////////////////////
 /**
@@ -431,6 +431,16 @@ struct TestData : CheckExtents {
 		state.ResumeTiming();
 	}
 
+	/** Prepare full size rtree and amount of data for removal. */
+	void prepare_full(size_t N)
+	{
+		if (tree.size() != 0)
+			abort();
+		regenerate_data(N);
+		tree.insert(data);
+		restart_data();
+	}
+
 private:
 	/* Internal regenerate that does not stop timing. */
 	void regenerate_data(size_t N)
@@ -481,6 +491,15 @@ struct SearchData {
 			rt.generate(width);
 		data_pos = 0;
 		state.ResumeTiming();
+	}
+	/** Generate new data for selection. */
+	void prepare(size_t N)
+	{
+		data.resize(N);
+		double width = SearchBox<Dimension, Operation>::width(N);
+		for (auto &rt : data)
+			rt.generate(width);
+		data_pos = 0;
 	}
 };
 
@@ -635,6 +654,31 @@ BENCHMARK_TEMPLATE(BM_Search, 8, SOP_NEIGHBOR)->Apply(setup);
 BENCHMARK_TEMPLATE(BM_Iterate, 8, SOP_BELONGS)->Apply(setup);
 BENCHMARK_TEMPLATE(BM_Iterate, 8, SOP_NEIGHBOR)->Apply(setup);
 
-BENCHMARK_MAIN();
+//BENCHMARK_MAIN();
+
+#include <iostream>
+
+int main()
+{
+	std::cout << "Generate\n";
+	const size_t Dimension = 2;
+	const size_t N = 1024 * 1024;
+	const size_t M = 2;
+	TestData<Dimension> data;
+	data.prepare_full(N);
+	SearchData<Dimension, SOP_NEIGHBOR> search_data;
+	search_data.prepare(N);
+	int64_t op_count = 0;
+
+	std::cout << "Test\n";
+	for (size_t i = 0; i < M; i++) {
+		search_data.data_pos = 0;
+		for (size_t j = 0; j < N; j++) {
+			benchmark::DoNotOptimize(
+				data.tree.iterate(search_data.next(), SOP_NEIGHBOR));
+		}
+	}
+}
+
 
 #include "debug_warning.h"
