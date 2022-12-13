@@ -385,11 +385,6 @@ g.test_conflict = function()
                 ["avg"] = math.floor(trackers_used / 2),
                 ["total"] = trackers_used,
             },
-            ["conflicts"] = {
-                ["max"] = SIZE_OF_CONFLICT,
-                ["avg"] = math.floor(SIZE_OF_CONFLICT / 2),
-                ["total"] = SIZE_OF_CONFLICT,
-            },
             ["tuples"] = {
                 ["used"] = {
                     ["stories"] = {
