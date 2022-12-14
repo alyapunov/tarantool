@@ -272,6 +272,8 @@ struct engine {
 	const char *name;
 	/** Engine id. */
 	uint32_t id;
+	/** Engine id in terms of transaction engine. */
+	int32_t in_txn_id;
 	/** Engine flags. */
 	uint32_t flags;
 	/** Used for search for engine by name. */
