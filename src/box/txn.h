@@ -262,6 +262,7 @@ struct txn_stmt {
 	struct txn *txn;
 	/** Undo info. */
 	struct space *space;
+	struct engine *engine;
 	struct tuple *old_tuple;
 	struct tuple *new_tuple;
 	/** Structure, which contains tuples for rollback. */
@@ -399,6 +400,12 @@ enum tx_alloc_type {
 
 extern const char *tx_alloc_type_strs[];
 
+enum {
+	TXN_ENGINE_MEMTX = 0,
+	TXN_ENGINE_VINYL = 1,
+	TXN_NUMBER_OF_ENGINES = 2,
+};
+
 struct txn {
 	/** A stailq_entry to hold a txn in a cache. */
 	struct stailq_entry in_txn_cache;
@@ -474,9 +481,9 @@ struct txn {
 	/** LSN of this transaction when written to WAL. */
 	int64_t signature;
 	/** Engine involved in multi-statement transaction. */
-	struct engine *engine;
+	struct engine *engines[TXN_NUMBER_OF_ENGINES];
 	/** Engine-specific transaction data */
-	void *engine_tx;
+	void *engine_txs[TXN_NUMBER_OF_ENGINES];
 	/* A fiber to wake up when transaction is finished. */
 	struct fiber *fiber;
 	/** Timestampt of entry write start. */

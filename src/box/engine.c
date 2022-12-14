@@ -48,8 +48,13 @@ enum { MAX_ENGINE_COUNT = 10 };
 void engine_register(struct engine *engine)
 {
 	static int n_engines;
+	static int32_t n_tnx_engines;
 	rlist_add_tail_entry(&engines, engine, link);
 	engine->id = n_engines++;
+	if (engine->flags & ENGINE_BYPASS_TX)
+		engine->txn_id = -1;
+	else
+		engine->txn_id = n_tnx_engines++;
 }
 
 /** Find engine by name. */

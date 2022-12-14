@@ -538,7 +538,9 @@ memtx_engine_prepare(struct engine *engine, struct txn *txn)
 	if (memtx_tx_manager_use_mvcc_engine) {
 		struct txn_stmt *stmt;
 		stailq_foreach_entry(stmt, &txn->stmts, next) {
-			assert(stmt->space->engine == engine);
+			if (stmt->space == NULL ||
+			    stmt->space->engine != engine)
+				continue;
 			memtx_tx_history_prepare_stmt(stmt);
 		}
 		memtx_tx_prepare_finalize(txn);
@@ -555,7 +557,9 @@ memtx_engine_commit(struct engine *engine, struct txn *txn)
 	if (memtx_tx_manager_use_mvcc_engine) {
 		struct txn_stmt *stmt;
 		stailq_foreach_entry(stmt, &txn->stmts, next) {
-			assert(stmt->space->engine == engine);
+			if (stmt->space == NULL ||
+			    stmt->space->engine != engine)
+				continue;
 			struct memtx_space *mspace =
 				(struct memtx_space *)stmt->space;
 			size_t *bsize = &mspace->bsize;
