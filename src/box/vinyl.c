@@ -2430,7 +2430,7 @@ vinyl_engine_begin(struct engine *engine, struct txn *txn)
 {
 	struct vy_env *env = vy_env(engine);
 	assert(txn->engine_tx == NULL);
-	txn->engine_tx = vy_tx_begin(env->xm, txn->isolation);
+	txn->engine_tx = vy_tx_begin(env->xm, txn);
 	if (txn->engine_tx == NULL)
 		return -1;
 	return 0;
@@ -3823,7 +3823,7 @@ vinyl_index_create_iterator(struct index *base, enum iterator_type type,
 		trigger_add(&tx->on_destroy, &it->on_tx_destroy);
 	} else {
 		tx = &it->tx_autocommit;
-		vy_tx_create(env->xm, tx);
+		vy_tx_create(env->xm, tx, NULL);
 	}
 	it->tx = tx;
 
@@ -3856,7 +3856,7 @@ vinyl_index_get(struct index *index, const char *key,
 	struct vy_tx tx_autocommit;
 	if (tx == NULL) {
 		tx = &tx_autocommit;
-		vy_tx_create(env->xm, tx);
+		vy_tx_create(env->xm, tx, NULL);
 	}
 	/*
 	 * Make sure the LSM tree isn't deleted while we are

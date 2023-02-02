@@ -148,6 +148,11 @@ struct vy_tx {
 	/** Transaction manager. */
 	struct vy_tx_manager *xm;
 	/**
+	 * Common transaction. Can be NULL for read-only pseudo transaction,
+	 * for example for an iterator that was made without box.begin() call.
+	 */
+	struct txn *txn;
+	/**
 	 * Pointer to the space affected by the last prepared statement.
 	 * We need it so that we can abort a transaction on DDL even
 	 * if it hasn't inserted anything into the write set yet (e.g.
@@ -198,11 +203,6 @@ struct vy_tx {
 	 * intervals.
 	 */
 	vy_tx_read_set_t read_set;
-	/**
-	 * Prepare sequence number or -1 if the transaction
-	 * is not prepared.
-	 */
-	int64_t psn;
 	/* List of triggers invoked when this transaction ends. */
 	struct rlist on_destroy;
 };
@@ -237,13 +237,6 @@ struct vy_tx_manager {
 	 * vinyl. Updated in vy_commit().
 	 */
 	int64_t lsn;
-	/**
-	 * A global transaction prepare counter: a transaction
-	 * is assigned an id at the time of vy_prepare(). Is used
-	 * to order statements of prepared but not yet committed
-	 * transactions in vy_mem.
-	 */
-	int64_t psn;
 	/**
 	 * List of rw transactions, linked by vy_tx::in_writers.
 	 */
@@ -345,7 +338,7 @@ vy_tx_manager_abort_writers_for_ro(struct vy_tx_manager *xm);
 
 /** Initialize a tx object. */
 void
-vy_tx_create(struct vy_tx_manager *xm, struct vy_tx *tx);
+vy_tx_create(struct vy_tx_manager *xm, struct vy_tx *tx, struct txn *txn);
 
 /** Destroy a tx object. */
 void
@@ -353,7 +346,7 @@ vy_tx_destroy(struct vy_tx *tx);
 
 /** Begin a new transaction. */
 struct vy_tx *
-vy_tx_begin(struct vy_tx_manager *xm, enum txn_isolation_level isolation);
+vy_tx_begin(struct vy_tx_manager *xm, struct txn *txn);
 
 /** Prepare a transaction to be committed. */
 int

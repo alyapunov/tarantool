@@ -172,7 +172,8 @@ vy_tx_manager_read_view(struct vy_tx_manager *xm, int64_t plsn)
 	/* Look up the last prepared tx with lsn less than the given one. */
 	struct vy_tx *tx;
 	rlist_foreach_entry_reverse(tx, &xm->prepared, in_prepared) {
-		if (plsn > MAX_LSN + tx->psn)
+		assert(tx->txn != NULL);
+		if (plsn > MAX_LSN + tx->txn->psn)
 			break;
 	}
 	bool tx_exists = !rlist_entry_is_head(tx, &xm->prepared, in_prepared);
@@ -182,7 +183,7 @@ vy_tx_manager_read_view(struct vy_tx_manager *xm, int64_t plsn)
 	 */
 	if (rv_exists) {
 		if ((!tx_exists && rv->vlsn == xm->lsn) ||
-		    (tx_exists && rv->vlsn == MAX_LSN + tx->psn)) {
+		    (tx_exists && rv->vlsn == MAX_LSN + tx->txn->psn)) {
 			rv->refs++;
 			return rv;
 		}
@@ -199,7 +200,7 @@ vy_tx_manager_read_view(struct vy_tx_manager *xm, int64_t plsn)
 		return NULL;
 	}
 	if (tx_exists) {
-		rv->vlsn = MAX_LSN + tx->psn;
+		rv->vlsn = MAX_LSN + tx->txn->psn;
 		tx->read_view = rv;
 		rv->refs = 2;
 	} else {
@@ -333,7 +334,7 @@ vy_tx_read_set_free_cb(vy_tx_read_set_t *read_set,
 }
 
 void
-vy_tx_create(struct vy_tx_manager *xm, struct vy_tx *tx)
+vy_tx_create(struct vy_tx_manager *xm, struct vy_tx *tx, struct txn *txn)
 {
 	tx->last_stmt_space = NULL;
 	stailq_create(&tx->log);
@@ -341,12 +342,12 @@ vy_tx_create(struct vy_tx_manager *xm, struct vy_tx *tx)
 	tx->write_set_version = 0;
 	tx->write_size = 0;
 	tx->xm = xm;
-	tx->isolation = TXN_ISOLATION_READ_CONFIRMED;
+	tx->txn = txn;
+	tx->isolation = txn ? txn->isolation : TXN_ISOLATION_READ_CONFIRMED;
 	tx->state = VINYL_TX_READY;
 	tx->is_applier_session = false;
 	tx->read_view = (struct vy_read_view *)xm->p_global_read_view;
 	vy_tx_read_set_new(&tx->read_set);
-	tx->psn = 0;
 	rlist_create(&tx->on_destroy);
 	rlist_create(&tx->in_writers);
 	rlist_create(&tx->in_prepared);
@@ -458,22 +459,21 @@ vy_tx_abort_readers(struct vy_tx *tx, struct txv *v)
 }
 
 struct vy_tx *
-vy_tx_begin(struct vy_tx_manager *xm, enum txn_isolation_level isolation)
+vy_tx_begin(struct vy_tx_manager *xm, struct txn *txn)
 {
-	assert(isolation < txn_isolation_level_MAX &&
-	       isolation != TXN_ISOLATION_DEFAULT);
+	assert(txn->isolation < txn_isolation_level_MAX &&
+	       txn->isolation != TXN_ISOLATION_DEFAULT);
 	struct vy_tx *tx = mempool_alloc(&xm->tx_mempool);
 	if (unlikely(tx == NULL)) {
 		diag_set(OutOfMemory, sizeof(*tx), "mempool", "struct vy_tx");
 		return NULL;
 	}
-	vy_tx_create(xm, tx);
+	vy_tx_create(xm, tx, txn);
 
 	struct session *session = fiber_get_session(fiber());
 	if (session != NULL && session->type == SESSION_TYPE_APPLIER)
 		tx->is_applier_session = true;
 
-	tx->isolation = isolation;
 	return tx;
 }
 
@@ -686,6 +686,8 @@ int
 vy_tx_prepare(struct vy_tx *tx)
 {
 	struct vy_tx_manager *xm = tx->xm;
+	assert(tx->txn != NULL);
+	assert(tx->txn->psn != 0);
 
 	if (tx->state == VINYL_TX_ABORT) {
 		/* Conflict is already accounted - see vy_tx_abort(). */
@@ -699,7 +701,6 @@ vy_tx_prepare(struct vy_tx *tx)
 		return 0;
 	assert(!vy_tx_is_in_read_view(tx));
 	assert(tx->read_view == &xm->global_read_view);
-	tx->psn = ++xm->psn;
 
 	/** Send to read view read intersection and abort write intersection. */
 	struct txv *v;
@@ -792,7 +793,7 @@ vy_tx_prepare(struct vy_tx *tx)
 			return -1;
 
 		/* In secondary indexes only REPLACE/DELETE can be written. */
-		vy_stmt_set_lsn(v->entry.stmt, MAX_LSN + tx->psn);
+		vy_stmt_set_lsn(v->entry.stmt, MAX_LSN + tx->txn->psn);
 		struct tuple **region_stmt =
 			(type == IPROTO_DELETE) ? &delete : &repsert;
 		if (vy_tx_write(lsm, v->mem, v->entry, region_stmt) != 0)
