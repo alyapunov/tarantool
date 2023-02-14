@@ -355,7 +355,57 @@ g.test_tracker = function()
     tx_gc(g.server, 10, diff)
 end
 
-g.test_conflict = function()
+-- Test that monitoring shows hole point tracker.
+g.test_point_tracker = function()
+    g.server:eval('tx1 = txn_proxy.new()')
+    g.server:eval('tx2 = txn_proxy.new()')
+    g.server:eval('box.internal.memtx_tx_gc(10)')
+    t.assert(table_values_are_zeros(g.server:eval('return box.stat.memtx.tx()')))
+    g.server:eval('tx1:begin()')
+    g.server:eval('tx2:begin()')
+    g.server:eval('tx1("s:get(1)")')
+    g.server:eval('tx2("s:replace{2, 2}")')
+    g.server:eval("box.internal.memtx_tx_gc(10)")
+    local trackers_used = SIZE_OF_POINT_TRACKER
+    local diff = {
+        ["txn"] = {
+            ["statements"] = {
+                ["max"] = SIZE_OF_STMT,
+                ["avg"] = math.floor(SIZE_OF_STMT / 2),
+                ["total"] = SIZE_OF_STMT,
+            },
+            ["system"] = {
+                ["max"] = SIZE_OF_XROW,
+                ["avg"] = math.floor(SIZE_OF_XROW / 2),
+                ["total"] = SIZE_OF_XROW,
+            },
+        },
+        ["mvcc"] = {
+            ["trackers"] = {
+                ["max"] = trackers_used,
+                ["avg"] = math.floor(trackers_used / 2),
+                ["total"] = trackers_used,
+            },
+            ["conflicts"] = {
+                ["max"] = 0,
+                ["avg"] = 0,
+                ["total"] = 0,
+            },
+            ["tuples"] = {
+                ["used"] = {
+                    ["stories"] = {
+                        ["total"] = SIZE_OF_STORY,
+                        ["count"] = 1,
+                    },
+                },
+            },
+        },
+    }
+    tx_gc(g.server, 10, diff)
+end
+
+-- Test that hole point tracker was displaced by normal read tracker.
+g.test_point_tracker_rebind = function()
     g.server:eval('tx1 = txn_proxy.new()')
     g.server:eval('tx2 = txn_proxy.new()')
     g.server:eval('box.internal.memtx_tx_gc(10)')
@@ -365,7 +415,7 @@ g.test_conflict = function()
     g.server:eval('tx1("s:get(1)")')
     g.server:eval('tx2("s:replace{1, 2}")')
     g.server:eval("box.internal.memtx_tx_gc(10)")
-    local trackers_used = SIZE_OF_READ_TRACKER + SIZE_OF_POINT_TRACKER
+    local trackers_used = SIZE_OF_READ_TRACKER
     local diff = {
         ["txn"] = {
             ["statements"] = {

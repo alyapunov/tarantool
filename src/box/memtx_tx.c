@@ -1638,44 +1638,52 @@ memtx_tx_check_dup(struct tuple *new_tuple, struct tuple *old_tuple,
 	return 0;
 }
 
-static struct point_hole_item *
-point_hole_storage_find(struct index *index, struct tuple *tuple)
-{
-	struct point_hole_key key;
-	key.index = index;
-	key.tuple = tuple;
-	mh_int_t pos = mh_point_holes_find(txm.point_holes, &key, 0);
-	if (pos == mh_end(txm.point_holes))
-		return NULL;
-	return *mh_point_holes_node(txm.point_holes, pos);
-}
-
 static void
 memtx_tx_track_read_story(struct txn *txn, struct space *space,
 			  struct memtx_story *story, uint64_t index_mask);
 
 /**
  * Check for possible conflict relations during insertion of @a new tuple,
- * and given that it was a real insertion, not the replacement of existing
- * tuple. It's the moment where we can search for stored point hole trackers
- * and find conflict causes.
+ * (with the corresponding @a story) into index @a ind. It is needed if and
+ * only if that was real insertion - there was no replaced tuple in the index.
+ * It's the moment where we can search for stored point hole trackers and find
+ * conflict causes. If some transactions have been reading the key in the
+ * index (and found nothing) - those transactions will be removed from
+ * point hole tracker and will be rebind as normal reader of given tuple.
  */
 static void
-check_hole(struct space *space, struct memtx_story *story,
-	   struct tuple *new_tuple, uint32_t ind)
+memtx_tx_handle_point_hole_write(struct space *space, struct memtx_story *story,
+				 struct tuple *new_tuple, uint32_t ind)
 {
-	struct point_hole_item *list =
-		point_hole_storage_find(space->index[ind], new_tuple);
-	if (list == NULL)
+	struct mh_point_holes_t *ht = txm.point_holes;
+	struct point_hole_key key;
+	key.index = space->index[ind];
+	key.tuple = new_tuple;
+	mh_int_t pos = mh_point_holes_find(ht, &key, 0);
+	if (pos == mh_end(ht))
 		return;
+	struct point_hole_item *item = *mh_point_holes_node(ht, pos);
 
-	struct point_hole_item *item = list;
+	struct memtx_tx_mempool *pool = &txm.point_hole_item_pool;
 	uint64_t index_mask = 1ull << (ind & 63);
+	bool has_more_items;
 	do {
 		memtx_tx_track_read_story(item->txn, space, story, index_mask);
-		item = rlist_entry(item->ring.next,
-				   struct point_hole_item, ring);
-	} while (item != list);
+
+		struct point_hole_item *next_item =
+			rlist_entry(item->ring.next,
+				    struct point_hole_item, ring);
+		has_more_items = next_item != item;
+
+		rlist_del(&item->ring);
+		rlist_del(&item->in_point_holes_list);
+		memtx_tx_mempool_free(item->txn, pool, item);
+
+		item = next_item;
+	} while (has_more_items);
+
+	mh_point_holes_del(ht, pos, 0);
+	txm.point_holes_size--;
 }
 
 /**
@@ -1917,7 +1925,9 @@ memtx_tx_history_add_insert_stmt(struct txn_stmt *stmt,
 
 	/* Collect point phantom read conflicts. */
 	for (uint32_t i = 0; i < space->index_count; i++)
-		check_hole(space, add_story, new_tuple, i);
+		if (directly_replaced[i] == NULL)
+			memtx_tx_handle_point_hole_write(space, add_story,
+							 new_tuple, i);
 
 	for (uint32_t i = 1; i < space->index_count; i++) {
 		if (directly_replaced[i] == NULL) {
