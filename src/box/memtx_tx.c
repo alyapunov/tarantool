@@ -2656,9 +2656,16 @@ tx_read_tracker_new(struct txn *reader, struct memtx_story *story,
 }
 
 static void
-memtx_tx_track_read_story_slow(struct txn *txn, struct memtx_story *story,
-			       uint64_t index_mask)
+memtx_tx_track_read_story(struct txn *txn, struct space *space,
+			  struct memtx_story *story, uint64_t index_mask)
 {
+	if (txn == NULL)
+		return;
+	if (space == NULL)
+		return;
+	if (space->def->opts.is_ephemeral)
+		return;
+	(void)space;
 	assert(story != NULL);
 	struct tx_read_tracker *tracker = NULL;
 
@@ -2689,19 +2696,6 @@ memtx_tx_track_read_story_slow(struct txn *txn, struct memtx_story *story,
 	}
 	rlist_add(&story->reader_list, &tracker->in_reader_list);
 	rlist_add(&txn->read_set, &tracker->in_read_set);
-}
-
-static void
-memtx_tx_track_read_story(struct txn *txn, struct space *space,
-			  struct memtx_story *story, uint64_t index_mask)
-{
-	if (txn == NULL)
-		return;
-	if (space == NULL)
-		return;
-	if (space->def->opts.is_ephemeral)
-		return;
-	memtx_tx_track_read_story_slow(txn, story, index_mask);
 }
 
 /**
