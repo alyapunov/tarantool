@@ -13,7 +13,7 @@ local SIZE_OF_TUPLE = 9
 -- Size of xrow for tuples with 2 number fields
 local SIZE_OF_XROW = 147
 -- Tracker can allocate additional memory, be careful!
-local SIZE_OF_READ_TRACKER = 56
+local SIZE_OF_READ_TRACKER = 48
 local SIZE_OF_CONFLICT_TRACKER = 48
 local SIZE_OF_POINT_TRACKER = 88
 local SIZE_OF_GAP_TRACKER = 80
@@ -404,7 +404,7 @@ g.test_point_tracker = function()
     tx_gc(g.server, 10, diff)
 end
 
--- Test that hole point tracker was displaced by normal read tracker.
+-- Test that hole point tracker was replaced by gap read tracker.
 g.test_point_tracker_rebind = function()
     g.server:eval('tx1 = txn_proxy.new()')
     g.server:eval('tx2 = txn_proxy.new()')
@@ -415,7 +415,7 @@ g.test_point_tracker_rebind = function()
     g.server:eval('tx1("s:get(1)")')
     g.server:eval('tx2("s:replace{1, 2}")')
     g.server:eval("box.internal.memtx_tx_gc(10)")
-    local trackers_used = SIZE_OF_READ_TRACKER
+    local trackers_used = SIZE_OF_GAP_TRACKER
     local diff = {
         ["txn"] = {
             ["statements"] = {
