@@ -282,10 +282,7 @@ memtx_tx_track_point(struct txn *txn, struct space *space,
 {
 	if (!memtx_tx_manager_use_mvcc_engine)
 		return;
-	if (txn == NULL)
-		return;
-	/* Skip ephemeral spaces. */
-	if (space == NULL || space->def->id == 0)
+	if (txn == NULL || space == NULL || space->def->opts.is_ephemeral)
 		return;
 	memtx_tx_track_point_slow(txn, index, key);
 }
@@ -315,10 +312,7 @@ memtx_tx_track_gap(struct txn *txn, struct space *space, struct index *index,
 {
 	if (!memtx_tx_manager_use_mvcc_engine)
 		return;
-	if (txn == NULL)
-		return;
-	/* Skip ephemeral spaces. */
-	if (space == NULL || space->def->id == 0)
+	if (txn == NULL || space == NULL || space->def->opts.is_ephemeral)
 		return;
 	memtx_tx_track_gap_slow(txn, space, index, successor,
 				type, key, part_count);
@@ -346,10 +340,7 @@ memtx_tx_track_full_scan(struct txn *txn, struct space *space,
 {
 	if (!memtx_tx_manager_use_mvcc_engine)
 		return;
-	if (txn == NULL)
-		return;
-	/* Skip ephemeral spaces. */
-	if (space == NULL || space->def->id == 0)
+	if (txn == NULL || space == NULL || space->def->opts.is_ephemeral)
 		return;
 	memtx_tx_track_full_scan_slow(txn, index);
 }

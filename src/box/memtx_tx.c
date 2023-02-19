@@ -2018,7 +2018,7 @@ memtx_tx_history_add_stmt(struct txn_stmt *stmt, struct tuple *old_tuple,
 			  struct tuple **result)
 {
 	assert(stmt != NULL);
-	assert(stmt->space != NULL);
+	assert(stmt->space != NULL && !stmt->space->def->opts.is_ephemeral);
 	assert(new_tuple != NULL || old_tuple != NULL);
 	assert(new_tuple == NULL || !tuple_has_flag(new_tuple, TUPLE_IS_DIRTY));
 
@@ -2659,11 +2659,7 @@ static void
 memtx_tx_track_read_story(struct txn *txn, struct space *space,
 			  struct memtx_story *story, uint64_t index_mask)
 {
-	if (txn == NULL)
-		return;
-	if (space == NULL)
-		return;
-	if (space->def->opts.is_ephemeral)
+	if (txn == NULL || space == NULL || space->def->opts.is_ephemeral)
 		return;
 	(void)space;
 	assert(story != NULL);
@@ -2708,11 +2704,7 @@ memtx_tx_track_read(struct txn *txn, struct space *space, struct tuple *tuple)
 {
 	if (tuple == NULL)
 		return;
-	if (txn == NULL)
-		return;
-	if (space == NULL)
-		return;
-	if (space->def->opts.is_ephemeral)
+	if (txn == NULL || space == NULL || space->def->opts.is_ephemeral)
 		return;
 
 	if (tuple_has_flag(tuple, TUPLE_IS_DIRTY)) {
