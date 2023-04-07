@@ -683,7 +683,14 @@ memtx_tx_acquire_ddl(struct txn *tx)
 	(void) txn_can_yield(tx, false);
 }
 
-void
+/**
+ * Mark all transactions except for a given as aborted due to conflict:
+ * when DDL operation is about to be committed other transactions are
+ * considered to use obsolete schema so that should be aborted.
+ *
+ * NB: can trigger story garbage collection.
+ */
+static void
 memtx_tx_abort_all_for_ddl(struct txn *ddl_owner)
 {
 	struct txn *to_be_aborted;
@@ -2715,6 +2722,8 @@ memtx_tx_prepare_finalize(struct txn *txn)
 {
 	/* Just free all other lists - we don't need 'em anymore. */
 	memtx_tx_clear_txn_read_lists(txn);
+	if (txn->is_schema_changed)
+		memtx_tx_abort_all_for_ddl(txn);
 }
 
 void
