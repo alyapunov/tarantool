@@ -38,6 +38,7 @@
 #include "mp_datetime.h"
 #include "mp_interval.h"
 #include "mp_compression.h"
+#include "mp_tuple.h"
 
 static int
 msgpack_fprint_ext(FILE *file, const char **data, int depth)
@@ -104,6 +105,8 @@ msgpack_check_ext_data(int8_t type, const char *data, uint32_t len)
 		return mp_validate_error(data, len);
 	case MP_INTERVAL:
 		return mp_validate_interval(data, len);
+	case MP_TUPLE:
+		return mp_validate_tuple(data, len);
 	case MP_COMPRESSION:
 	default:
 		return mp_check_ext_data_default(type, data, len);
