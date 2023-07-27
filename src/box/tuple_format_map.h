@@ -50,7 +50,7 @@ tuple_format_map_create_empty(struct tuple_format_map *map);
  * Create a tuple format map from MsgPack data. The data is expected to
  * contain an array of serialized tuple formats.
  *
- * Returns 0 on success, otherwise -1.
+ * Returns 0 on success, otherwise -1, diag is set.
  */
 int
 tuple_format_map_create_from_mp(struct tuple_format_map *map, const char *data);
@@ -63,6 +63,7 @@ tuple_format_map_destroy(struct tuple_format_map *map);
 
 /**
  * Move the tuple format from @a src to @a dst and destroy @a src.
+ * The destination format map must be empty or uninitialized.
  */
 void
 tuple_format_map_move(struct tuple_format_map *dst,

@@ -236,15 +236,174 @@ test_tuple_format_map_cache_and_hash_table(void)
 	return check_plan();
 }
 
+/**
+ * Test that formats that are added to format map does not leak after
+ * destruction of the format map.
+ */
+static int
+test_tuple_format_map_duplicate(size_t format_count, size_t add_count)
+{
+	plan(2 * format_count);
+	uint16_t *format_ids = malloc(format_count * sizeof(format_ids[0]));
+
+	struct tuple_format_map map;
+	tuple_format_map_create_empty(&map);
+
+	for (size_t i = 0; i < format_count; ++i) {
+		char name[8];
+		snprintf(name, lengthof(name), "test%zu", i);
+		char str_format[16];
+		size_t len = mp_format(str_format, lengthof(str_format),
+				       "[{%s%s}]", "name", name);
+		struct tuple_format *format =
+			runtime_tuple_format_new(str_format, len, false);
+		is(format->refs, 0, "the new format must have not refs");
+		tuple_format_ref(format);
+		format_ids[i] = format->id;
+	}
+
+	for (size_t j = 0; j < add_count; ++j)
+		for (size_t i = 0; i < format_count; ++i)
+			tuple_format_map_add_format(&map, format_ids[i]);
+
+	tuple_format_map_destroy(&map);
+
+	for (size_t i = 0; i < format_count; ++i) {
+		struct tuple_format *format = tuple_format_by_id(format_ids[i]);
+		is(format->refs, 1, "must be the last ref");
+		tuple_format_unref(format);
+	}
+
+	free(format_ids);
+	return check_plan();
+}
+
+/**
+ * Insert one format many times and check format leaks.
+ */
+static int
+test_tuple_format_map_duplicate_one_format()
+{
+	header();
+	size_t format_count = 1;
+	size_t add_count = TUPLE_FORMAT_MAP_CACHE_SIZE * 10;
+	int rc = test_tuple_format_map_duplicate(format_count, add_count);
+	footer();
+	return rc;
+}
+
+/**
+ * Insert few formats (fits to cache) many times and check format leaks.
+ */
+static int
+test_tuple_format_map_duplicate_few_formats()
+{
+	header();
+	size_t format_count = TUPLE_FORMAT_MAP_CACHE_SIZE;
+	size_t add_count = TUPLE_FORMAT_MAP_CACHE_SIZE * 10;
+	int rc = test_tuple_format_map_duplicate(format_count, add_count);
+	footer();
+	return rc;
+}
+
+/**
+ * Insert many formats (doesn't fit to cache) many times and check format leaks.
+ */
+static int
+test_tuple_format_map_duplicate_many_formats()
+{
+	header();
+	size_t format_count = TUPLE_FORMAT_MAP_CACHE_SIZE * 4;
+	size_t add_count = TUPLE_FORMAT_MAP_CACHE_SIZE * 10;
+	int rc = test_tuple_format_map_duplicate(format_count, add_count);
+	footer();
+	return rc;
+}
+
+/**
+ * Check for format leaks after loading from msgpack.
+ */
+static int
+test_tuple_format_map_decode_from_msgpack()
+{
+	header();
+	plan(21);
+
+	struct tuple_format *format[2];
+	char name[2][8];
+	for (size_t i = 0; i < lengthof(format); i++) {
+		snprintf(name[i], lengthof(name[i]), "test%zu", i);
+		char str_format[16];
+		size_t len = mp_format(str_format, lengthof(str_format),
+				       "[{%s%s}]", "name", name[i]);
+		format[i] = runtime_tuple_format_new(str_format, len, true);
+		is(format[i]->refs, 0, "the new format must have not refs");
+		tuple_format_ref(format[i]);
+	}
+
+	char buf[1024];
+	struct tuple_format_map map;
+
+	/* Valid formats. */
+	mp_format(buf, lengthof(buf), "{%u[{%s%s}]%u[{%s%s}]}",
+		  0, "name", name[0], 1, "name", name[1]);
+	is(tuple_format_map_create_from_mp(&map, buf), 0, "expected success");
+	for (size_t i = 0; i < lengthof(format); i++)
+		is(format[i]->refs, 2, "must be referenced from map");
+	tuple_format_map_destroy(&map);
+	for (size_t i = 0; i < lengthof(format); i++)
+		is(format[i]->refs, 1, "must be unreferenced from map");
+
+	/* Invalid format id. */
+	mp_format(buf, lengthof(buf), "{%u[{%s%s}]%s[{%s%s}]}",
+		  0, "name", name[0], "invalid", "name", name[1]);
+	is(tuple_format_map_create_from_mp(&map, buf), -1, "expected failure");
+	ok(!diag_is_empty(diag_get()), "diag must be set");
+	diag_clear(diag_get());
+	for (size_t i = 0; i < lengthof(format); i++)
+		is(format[i]->refs, 1, "must not be referenced from map");
+
+	/* Invalid format. */
+	mp_format(buf, lengthof(buf), "{%u[{%s%s}]%u%s}",
+		  0, "name", name[0], 1, "invalid");
+	is(tuple_format_map_create_from_mp(&map, buf), -1, "expected failure");
+	ok(!diag_is_empty(diag_get()), "diag must be set");
+	diag_clear(diag_get());
+	for (size_t i = 0; i < lengthof(format); i++)
+		is(format[i]->refs, 1, "must not be referenced from map");
+
+	/* Invalid format of format. */
+	mp_format(buf, lengthof(buf), "{%u[{%s%s}]%u[{%s%s}]}",
+		  0, "name", name[0], 1, "invalid", name[1]);
+	is(tuple_format_map_create_from_mp(&map, buf), -1, "expected failure");
+	ok(!diag_is_empty(diag_get()), "diag must be set");
+	diag_clear(diag_get());
+	for (size_t i = 0; i < lengthof(format); i++)
+		is(format[i]->refs, 1, "must not be referenced from map");
+
+	for (size_t i = 0; i < lengthof(format); i++) {
+		is(format[i]->refs, 1, "must be the last ref");
+		tuple_format_unref(format[i]);
+	}
+
+	footer();
+	return check_plan();
+}
+
+
 static int
 test_tuple_format_map(void)
 {
-	plan(3);
+	plan(7);
 	header();
 
 	test_empty_tuple_format_map();
 	test_tuple_format_map_only_cache();
 	test_tuple_format_map_cache_and_hash_table();
+	test_tuple_format_map_duplicate_one_format();
+	test_tuple_format_map_duplicate_few_formats();
+	test_tuple_format_map_duplicate_many_formats();
+	test_tuple_format_map_decode_from_msgpack();
 
 	footer();
 	return check_plan();
