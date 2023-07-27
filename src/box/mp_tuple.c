@@ -63,7 +63,7 @@ tuple_unpack(const char **data, struct tuple_format_map *format_map)
 	struct tuple_format *format =
 		tuple_format_map_find(format_map, format_id);
 	if (format == NULL)
-		return NULL;
+		format = tuple_format_runtime;
 	return tuple_new(format, tuple_data, *data);
 }
 
@@ -95,13 +95,10 @@ mp_validate_tuple(const char *data, uint32_t len)
 	assert(len > 0);
 	const char *end = data + len;
 	enum mp_type type = mp_typeof(*data);
-	if (type == MP_UINT) {
-		if (mp_check_uint(data, end) > 0)
-			return -1;
-	} else {
+	if (type != MP_UINT || mp_check_uint(data, end) > 0)
 		return -1;
-	}
-	mp_decode_uint(&data);
+
+	mp_next(&data);
 	if (data == end)
 		return -1;
 	if (mp_typeof(*data) != MP_ARRAY)

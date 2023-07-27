@@ -20,7 +20,7 @@ uint32_t
 mp_sizeof_tuple(struct tuple *tuple);
 
 /**
- * Decode a tuple value from MsgPack data.
+ * Decode a tuple value from MsgPack data, including MP_EXT prefix.
  *
  * @param data A buffer.
  * @param format_map A tuple format map used for recovering the tuple's format.
