@@ -255,12 +255,6 @@ memtx_tx_prepare_finalize(struct txn *txn);
 void
 memtx_tx_history_commit_stmt(struct txn_stmt *stmt);
 
-/** Helper of memtx_tx_tuple_clarify */
-struct tuple *
-memtx_tx_tuple_clarify_slow(struct txn *txn, struct space *space,
-			    struct tuple *tuples, struct index *index,
-			    uint32_t mk_index);
-
 /** Helper of memtx_tx_track_point */
 void
 memtx_tx_track_point_slow(struct txn *txn, struct index *index,
@@ -350,6 +344,12 @@ memtx_tx_track_full_scan(struct txn *txn, struct space *space,
  */
 void
 memtx_tx_story_gc();
+
+/** Helper of memtx_tx_tuple_clarify */
+struct tuple *
+memtx_tx_tuple_clarify_slow(struct txn *txn, struct space *space,
+			    struct tuple *tuples, struct index *index,
+			    uint32_t mk_index);
 
 /**
  * Clean a tuple if it's dirty - finds a visible tuple in history.
