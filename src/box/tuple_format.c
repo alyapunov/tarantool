@@ -39,11 +39,13 @@
 
 #include <PMurHash.h>
 
-/** Global table of tuple formats */
-struct tuple_format **tuple_formats;
-static intptr_t recycled_format_ids = FORMAT_ID_NIL;
+/** The value of format->id if the format is not registered in global table. */
+enum { FORMAT_ID_NIL = UINT32_MAX };
 
-static uint32_t formats_size = 0, formats_capacity = 0;
+/** Global table of tuple formats */
+struct tuple_format *tuple_formats[FORMATS_CAPACITY];
+static intptr_t recycled_format_ids = -1;
+static uint32_t formats_size = 0;
 static uint64_t formats_epoch = 0;
 
 tuple_format_expr_compile_f tuple_format_expr_compile;
@@ -608,36 +610,19 @@ out:
 static int
 tuple_format_register(struct tuple_format *format)
 {
-	if (recycled_format_ids != FORMAT_ID_NIL) {
-
-		format->id = (uint16_t) recycled_format_ids;
-		recycled_format_ids = (intptr_t) tuple_formats[recycled_format_ids];
+	if (recycled_format_ids >= 0) {
+		format->id = (uint32_t)recycled_format_ids;
+		recycled_format_ids =
+			(intptr_t)tuple_formats[recycled_format_ids];
 	} else {
-		if (formats_size == formats_capacity) {
-			uint32_t new_capacity = formats_capacity ?
-						formats_capacity * 2 : 16;
-			struct tuple_format **formats;
-			formats = (struct tuple_format **)
-				realloc(tuple_formats, new_capacity *
-						       sizeof(tuple_formats[0]));
-			if (formats == NULL) {
-				diag_set(OutOfMemory,
-					 sizeof(struct tuple_format), "malloc",
-					 "tuple_formats");
-				return -1;
-			}
-
-			formats_capacity = new_capacity;
-			tuple_formats = formats;
-		}
-		uint32_t formats_size_max = FORMAT_ID_MAX + 1;
+		uint32_t formats_size_max = FORMATS_CAPACITY;
 		struct errinj *inj = errinj(ERRINJ_TUPLE_FORMAT_COUNT,
 					    ERRINJ_INT);
 		if (inj != NULL && inj->iparam > 0)
 			formats_size_max = inj->iparam;
 		if (formats_size >= formats_size_max) {
 			diag_set(ClientError, ER_TUPLE_FORMAT_LIMIT,
-				 (unsigned) formats_capacity);
+				 (unsigned) formats_size_max);
 			return -1;
 		}
 		format->id = formats_size++;
@@ -1149,7 +1134,7 @@ void
 tuple_format_free()
 {
 	/* Clear recycled ids. */
-	while (recycled_format_ids != FORMAT_ID_NIL) {
+	while (recycled_format_ids >= 0) {
 		uint16_t id = (uint16_t) recycled_format_ids;
 		recycled_format_ids = (intptr_t) tuple_formats[id];
 		tuple_formats[id] = NULL;
@@ -1162,7 +1147,6 @@ tuple_format_free()
 			free(*format);
 		}
 	}
-	free(tuple_formats);
 	mh_tuple_format_delete(tuple_formats_hash);
 }
 
