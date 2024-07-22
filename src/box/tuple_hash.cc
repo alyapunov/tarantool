@@ -35,6 +35,8 @@
 #include "coll/coll.h"
 #include <math.h>
 
+static_assert(sizeof(struct tuple_format) == 176, "");
+
 /* Tuple and key hasher */
 namespace {
 
