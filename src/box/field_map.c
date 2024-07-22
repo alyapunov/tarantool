@@ -80,7 +80,7 @@ field_map_builder_slot_extent_new(struct field_map_builder *builder,
 }
 
 void
-field_map_build(struct field_map_builder *builder, char *buffer)
+field_map_build(struct field_map_builder *builder, char *field_map_end)
 {
 	/*
 	 * To initialize the field map and its extents, prepare
@@ -97,9 +97,8 @@ field_map_build(struct field_map_builder *builder, char *buffer)
 	 * The buffer size is assumed to be sufficient to write
 	 * field_map_build_size(builder) bytes there.
 	 */
-	uint32_t *field_map =
-		(uint32_t *)(buffer + field_map_build_size(builder));
-	char *extent_wptr = buffer;
+	uint32_t *field_map = (uint32_t *)field_map_end;
+	char *extent_wptr = field_map_end - field_map_build_size(builder);
 	for (int32_t i = -1; i >= -(int32_t)builder->slot_count; i--) {
 		/*
 		 * Can not access field_map as a normal uint32
@@ -121,5 +120,6 @@ field_map_build(struct field_map_builder *builder, char *buffer)
 			extent_offset_sz);
 		extent_wptr += sizeof(uint32_t) + extent_offset_sz;
 	}
-	assert(extent_wptr == buffer + builder->extents_size);
+	assert(extent_wptr == field_map_end - field_map_build_size(builder) +
+			      builder->extents_size);
 }

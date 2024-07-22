@@ -259,7 +259,7 @@ field_map_build_size(struct field_map_builder *builder)
  * The buffer must have at least field_map_build_size(builder) bytes.
  */
 void
-field_map_build(struct field_map_builder *builder, char *buffer);
+field_map_build(struct field_map_builder *builder, char *field_map_end);
 
 #endif /* TARANTOOL_BOX_FIELD_MAP_H_INCLUDED */
 
