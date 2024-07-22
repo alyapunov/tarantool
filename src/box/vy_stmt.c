@@ -327,19 +327,22 @@ vy_stmt_new_with_ops(struct tuple_format *format, const char *tuple_begin,
 	if (tuple_field_map_create(format, tuple_begin, false, &builder) != 0)
 		goto end;
 	uint32_t field_map_size = field_map_build_size(&builder);
+	uint32_t extra_size = tuple_extra_size(field_map_size);
 	/*
 	 * Allocate stmt. Offsets: one per key part + offset of the
 	 * statement end.
 	 */
 	size_t mpsize = (tuple_end - tuple_begin);
 	size_t bsize = mpsize + ops_size;
-	stmt = vy_stmt_alloc(format, sizeof(struct vy_stmt) +
+	stmt = vy_stmt_alloc(format, sizeof(struct vy_stmt) + extra_size +
 			     field_map_size, bsize);
 	if (stmt == NULL)
 		goto end;
 	/* Copy MsgPack data */
 	char *raw = (char *) tuple_data(stmt);
-	field_map_build(&builder, raw);
+	if (extra_size != 0)
+		tuple_extra_create(raw, format, false);
+	field_map_build(&builder, raw - extra_size);
 	char *wpos = raw;
 	memcpy(wpos, tuple_begin, mpsize);
 	wpos += mpsize;
@@ -482,13 +485,16 @@ vy_stmt_new_surrogate_delete_raw(struct tuple_format *format,
 	assert(pos <= data + src_size);
 	uint32_t bsize = pos - data;
 	uint32_t field_map_size = field_map_build_size(&builder);
-	stmt = vy_stmt_alloc(format, sizeof(struct vy_stmt) + field_map_size,
-			     bsize);
+	uint32_t extra_size = tuple_extra_size(field_map_size);
+	stmt = vy_stmt_alloc(format, sizeof(struct vy_stmt) + extra_size +
+			     field_map_size, bsize);
 	if (stmt == NULL)
 		goto out;
 	char *stmt_data = (char *) tuple_data(stmt);
 	memcpy(stmt_data, data, bsize);
-	field_map_build(&builder, stmt_data);
+	if (extra_size != 0)
+		tuple_extra_create(stmt_data, format, false);
+	field_map_build(&builder, stmt_data - extra_size);
 	vy_stmt_set_type(stmt, IPROTO_DELETE);
 	mp_tuple_assert(stmt_data, stmt_data + bsize);
 out:

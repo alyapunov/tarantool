@@ -321,6 +321,8 @@ private:
 
 	static void immediate_free_tuple(struct memtx_tuple *memtx_tuple)
 	{
+		if (tuple_has_extra(&memtx_tuple->base))
+			tuple_extra_destroy(&memtx_tuple->base);
 		size_t size = tuple_size(&memtx_tuple->base) +
 			      offsetof(struct memtx_tuple, base);
 		free(memtx_tuple, size);

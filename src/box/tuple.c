@@ -112,7 +112,9 @@ runtime_tuple_new(struct tuple_format *format, const char *data, const char *end
 	if (tuple_field_map_create(format, data, true, &builder) != 0)
 		goto end;
 	uint32_t field_map_size = field_map_build_size(&builder);
-	uint32_t data_offset = sizeof(struct tuple) + field_map_size;
+	uint32_t extra_size = tuple_extra_size(field_map_size);
+	uint32_t data_offset =
+		sizeof(struct tuple) + extra_size + field_map_size;
 	if (tuple_check_data_offset(data_offset) != 0)
 		goto end;
 
@@ -134,7 +136,9 @@ runtime_tuple_new(struct tuple_format *format, const char *data, const char *end
 		     data_offset, data_len, make_compact);
 	tuple_format_ref(format);
 	char *raw = (char *) tuple + data_offset;
-	field_map_build(&builder, raw);
+	if (extra_size != 0)
+		tuple_extra_create(raw, format, true);
+	field_map_build(&builder, raw - extra_size);
 	memcpy(raw, data, data_len);
 end:
 	region_truncate(region, region_svp);
@@ -149,6 +153,8 @@ runtime_tuple_delete(struct tuple_format *format, struct tuple *tuple)
 	assert(!tuple_has_flag(tuple, TUPLE_HAS_UPLOADED_REFS));
 	size_t total = tuple_size(tuple);
 	tuple_format_unref(format);
+	if (tuple_has_extra(tuple))
+		tuple_extra_destroy(tuple);
 	smfree(&runtime_alloc, tuple, total);
 }
 

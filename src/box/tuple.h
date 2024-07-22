@@ -701,6 +701,49 @@ tuple_format(struct tuple *tuple)
 	return format;
 }
 
+static inline bool
+tuple_has_extra(struct tuple *tuple)
+{
+	return tuple_data_offset(tuple) % 4 != 2;
+}
+
+static inline uint32_t
+tuple_extra_size(uint32_t field_map_size)
+{
+	return field_map_size == 0 ? 0 : sizeof(uint16_t);
+}
+
+static inline void
+tuple_extra_create(char *raw, struct tuple_format *format, bool ref_format)
+{
+	uint16_t format_id = format->id;
+	memcpy(raw - sizeof(format_id), &format_id, sizeof(format_id));
+	if (ref_format)
+		tuple_format_ref(format);
+}
+
+static inline void
+tuple_extra_destroy(struct tuple* tuple)
+{
+	assert(tuple_has_extra(tuple));
+	uint16_t fmt_id;
+	memcpy(&fmt_id, tuple_data(tuple) - sizeof(fmt_id), sizeof(fmt_id));
+	tuple_format_unref(tuple_format_by_id(fmt_id));
+}
+
+static inline struct tuple_format *
+tuple_extra_format(struct tuple *tuple)
+{
+	uint16_t data_offset = tuple_data_offset(tuple);
+	const char *data = (const char *) tuple + data_offset;
+	uint16_t fmt_id;
+	if (data_offset % 4 == 2)
+		fmt_id = 0;
+	else
+		memcpy(&fmt_id, data - sizeof(fmt_id), sizeof(fmt_id));
+	return tuple_format_by_id(fmt_id);
+}
+
 /** Check that some fields in tuple are compressed */
 static inline bool
 tuple_is_compressed(struct tuple *tuple)
@@ -776,7 +819,8 @@ tuple_validate(struct tuple_format *format, struct tuple *tuple)
 static inline const char *
 tuple_field_map(struct tuple *tuple)
 {
-	return tuple_data(tuple);
+	uint16_t fmt_id;
+	return tuple_data(tuple) - sizeof(fmt_id);
 }
 
 /**
