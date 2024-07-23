@@ -618,8 +618,8 @@ tuple_compare_slowpath(struct tuple *tuple_a, hint_t tuple_a_hint,
 	}
 
 	bool was_null_met = false;
-	struct tuple_format *format_a = tuple_format(tuple_a);
-	struct tuple_format *format_b = tuple_format(tuple_b);
+	struct tuple_format *format_a = tuple_extra_format(tuple_a);
+	struct tuple_format *format_b = tuple_extra_format(tuple_b);
 	const char *field_map_a = tuple_field_map(tuple_a);
 	const char *field_map_b = tuple_field_map(tuple_b);
 	struct key_part *end;
@@ -750,7 +750,7 @@ tuple_compare_with_key_slowpath(struct tuple *tuple, hint_t tuple_hint,
 	if (!is_multikey && (rc = hint_cmp(tuple_hint, key_hint)) != 0)
 		return rc;
 	struct key_part *part = key_def->parts;
-	struct tuple_format *format = tuple_format(tuple);
+	struct tuple_format *format = tuple_extra_format(tuple);
 	const char *tuple_raw = tuple_data(tuple);
 	const char *field_map = tuple_field_map(tuple);
 	enum mp_type a_type, b_type;
@@ -1179,8 +1179,8 @@ struct TupleCompare
 		int rc = hint_cmp(tuple_a_hint, tuple_b_hint);
 		if (rc != 0)
 			return rc;
-		struct tuple_format *format_a = tuple_format(tuple_a);
-		struct tuple_format *format_b = tuple_format(tuple_b);
+		struct tuple_format *format_a = tuple_extra_format(tuple_a);
+		struct tuple_format *format_b = tuple_extra_format(tuple_b);
 		const char *field_a, *field_b;
 		field_a = tuple_field_raw(format_a, tuple_data(tuple_a),
 					  tuple_field_map(tuple_a), IDX);
@@ -1201,8 +1201,8 @@ struct TupleCompare<0, TYPE, MORE_TYPES...> {
 		int rc = hint_cmp(tuple_a_hint, tuple_b_hint);
 		if (rc != 0)
 			return rc;
-		struct tuple_format *format_a = tuple_format(tuple_a);
-		struct tuple_format *format_b = tuple_format(tuple_b);
+		struct tuple_format *format_a = tuple_extra_format(tuple_a);
+		struct tuple_format *format_b = tuple_extra_format(tuple_b);
 		const char *field_a = tuple_data(tuple_a);
 		const char *field_b = tuple_data(tuple_b);
 		mp_decode_array(&field_a);
@@ -1366,7 +1366,7 @@ struct TupleCompareWithKey
 		int rc = hint_cmp(tuple_hint, key_hint);
 		if (rc != 0)
 			return rc;
-		struct tuple_format *format = tuple_format(tuple);
+		struct tuple_format *format = tuple_extra_format(tuple);
 		const char *field = tuple_field_raw(format, tuple_data(tuple),
 						    tuple_field_map(tuple),
 						    IDX);
@@ -1389,7 +1389,7 @@ struct TupleCompareWithKey<0, 0, TYPE, MORE_TYPES...>
 		int rc = hint_cmp(tuple_hint, key_hint);
 		if (rc != 0)
 			return rc;
-		struct tuple_format *format = tuple_format(tuple);
+		struct tuple_format *format = tuple_extra_format(tuple);
 		const char *field = tuple_data(tuple);
 		mp_decode_array(&field);
 		return FieldCompareWithKey<0, 0, TYPE, MORE_TYPES...>::
@@ -1479,8 +1479,8 @@ func_index_compare(struct tuple *tuple_a, hint_t tuple_a_hint,
 	 */
 	const char *tuple_a_raw = tuple_data(tuple_a);
 	const char *tuple_b_raw = tuple_data(tuple_b);
-	struct tuple_format *format_a = tuple_format(tuple_a);
-	struct tuple_format *format_b = tuple_format(tuple_b);
+	struct tuple_format *format_a = tuple_extra_format(tuple_a);
+	struct tuple_format *format_b = tuple_extra_format(tuple_b);
 	const char *field_map_a = tuple_field_map(tuple_a);
 	const char *field_map_b = tuple_field_map(tuple_b);
 	const char *field_a, *field_b;
@@ -1543,7 +1543,7 @@ func_index_compare_with_key(struct tuple *tuple, hint_t tuple_hint,
 	 * func key, were already skipped.
 	 */
 	const char *tuple_raw = tuple_data(tuple);
-	struct tuple_format *format = tuple_format(tuple);
+	struct tuple_format *format = tuple_extra_format(tuple);
 	const char *field_map = tuple_field_map(tuple);
 	const char *field;
 	part_count = MIN(part_count, key_def->part_count);
