@@ -1746,9 +1746,9 @@ template<class ALLOC>
 static void
 memtx_tuple_delete(struct tuple_format *format, struct tuple *tuple)
 {
+	(void)format;
 	assert(tuple_is_unreferenced(tuple));
 	MemtxAllocator<ALLOC>::free_tuple(tuple);
-	tuple_format_unref(format);
 }
 
 struct tuple_format_vtab memtx_tuple_format_vtab;

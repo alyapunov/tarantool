@@ -9,7 +9,7 @@ local SIZE_OF_STMT = 136
 -- Size of story with one link (for spaces with 1 index).
 local SIZE_OF_STORY = 144
 -- Size of tuple with 2 number fields
-local SIZE_OF_TUPLE = 9
+local SIZE_OF_TUPLE = 11
 -- Size of xrow for tuples with 2 number fields
 local SIZE_OF_XROW = 147
 -- Tracker can allocate additional memory, be careful!

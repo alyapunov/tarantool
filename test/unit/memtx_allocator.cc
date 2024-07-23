@@ -34,6 +34,7 @@ test_tuple_new(struct tuple_format *format, const char *data, const char *end)
 	struct tuple *tuple = MemtxAllocator<SmallAlloc>::alloc_tuple(size);
 	tuple_create(tuple, /*local_refs=*/0, tuple_format_id(format),
 		     /*data_offset=*/size, /*bsize=*/0, /*make_compact=*/true);
+	tuple_format_ref(format);
 	return tuple;
 }
 
@@ -522,10 +523,11 @@ main()
 		&test_tuple_format_vtab, /*engine=*/NULL,
 		/*keys=*/NULL, /*key_count=*/0);
 	fail_if(test_tuple_format == NULL);
+	tuple_format_ref(test_tuple_format);
 
 	int rc = test_main();
 
-	tuple_format_delete(test_tuple_format);
+	tuple_format_unref(test_tuple_format);
 	memtx_allocators_destroy();
 	slab_cache_destroy(&cache);
 	tuple_arena_destroy(&arena);

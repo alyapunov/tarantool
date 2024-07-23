@@ -391,6 +391,8 @@ struct PACKED tuple
 	uint8_t flags;
 	/** Format identifier. */
 	uint16_t format_id;
+	/** Format identifier. */
+	uint16_t extra_format_id;
 	/**
 	 * A pair of fields for storing data offset and data bsize:
 	 * Data offset - to the MessagePack from the begin of the tuple.
@@ -415,7 +417,7 @@ struct PACKED tuple
 	 */
 };
 
-static_assert(sizeof(struct tuple) == 10, "Just to be sure");
+static_assert(sizeof(struct tuple) == 12, "Just to be sure");
 
 static_assert(DIV_ROUND_UP(tuple_flag_MAX, 8) <=
 	      sizeof(((struct tuple *)0)->flags),
@@ -509,6 +511,7 @@ tuple_create(struct tuple *tuple, uint8_t refs, uint16_t format_id,
 	tuple->local_refs = refs;
 	tuple->flags = 0;
 	tuple->format_id = format_id;
+	tuple->extra_format_id = format_id;
 	if (make_compact) {
 		assert(tuple_can_be_compact(data_offset, bsize));
 		uint16_t combined = 0x8000;
@@ -695,6 +698,12 @@ tuple_format(struct tuple *tuple)
 	struct tuple_format *format = tuple_format_by_id(tuple->format_id);
 	assert(tuple_format_id(format) == tuple->format_id);
 	return format;
+}
+
+static inline struct tuple_format *
+tuple_extra_format(struct tuple *tuple)
+{
+	return tuple_format_by_id(tuple->extra_format_id);
 }
 
 /** Check that some fields in tuple are compressed */

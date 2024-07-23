@@ -318,6 +318,8 @@ private:
 
 	static void immediate_free_tuple(struct memtx_tuple *memtx_tuple)
 	{
+		uint16_t fmt_id = memtx_tuple->base.extra_format_id;
+		tuple_format_unref(tuple_format_by_id(fmt_id));
 		size_t size = tuple_size(&memtx_tuple->base) +
 			      offsetof(struct memtx_tuple, base);
 		free(memtx_tuple, size);
