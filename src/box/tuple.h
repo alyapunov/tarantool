@@ -416,6 +416,7 @@ struct PACKED tuple
 };
 
 static_assert(sizeof(struct tuple) == 10, "Just to be sure");
+static_assert(sizeof(struct tuple) % 4 == 2, "required for tuple_has_extra");
 
 static_assert(DIV_ROUND_UP(tuple_flag_MAX, 8) <=
 	      sizeof(((struct tuple *)0)->flags),
@@ -451,6 +452,9 @@ enum {
 	/** The size that is unused in struct tuple in compact mode. */
 	TUPLE_COMPACT_SAVINGS = sizeof(((struct tuple *)(NULL))->bsize_bulky),
 };
+
+static_assert((sizeof(struct tuple) - TUPLE_COMPACT_SAVINGS) % 4 == 2,
+	      "required for tuple_has_extra");
 
 /**
  * Check that data_offset is valid and can be stored in tuple.
