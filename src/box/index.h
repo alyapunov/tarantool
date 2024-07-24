@@ -669,6 +669,13 @@ struct read_view_tuple {
 	const char *data;
 	/** Size of tuple data. */
 	uint32_t size;
+	/**
+	 * Original tuple, if it exists in the flesh.
+	 * NULL if there's no one, so only there's only data+size.
+	 * Note that the tuple is possibly broken, lots of operations are
+	 * prohibited, use it only if you are sure that it's safe.
+	 */
+	 struct tuple *raw_tuple;
 };
 
 /** Object returned if there's no more tuples matching the search criteria. */
@@ -679,6 +686,7 @@ read_view_tuple_none(void)
 	tuple.needs_upgrade = false;
 	tuple.data = NULL;
 	tuple.size = 0;
+	tuple.raw_tuple = NULL;
 	return tuple;
 }
 

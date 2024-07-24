@@ -1918,10 +1918,12 @@ memtx_prepare_read_view_tuple(struct tuple *tuple,
 				memtx_read_view_tuple_needs_upgrade(
 					index->space->upgrade, tuple);
 	result->data = tuple_data_range(tuple, &result->size);
+	result->raw_tuple = tuple;
 	if (!index->space->rv->disable_decompression) {
 		result->data = memtx_tuple_decompress_raw(
 				result->data, result->data + result->size,
 				&result->size);
+		result->raw_tuple = tuple;
 		if (result->data == NULL)
 			return -1;
 	}
