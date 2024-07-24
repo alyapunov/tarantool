@@ -3813,6 +3813,22 @@ box_iproto_override(uint32_t req_type, iproto_handler_t handler,
 	return iproto_override(req_type, handler, destroy, ctx);
 }
 
+int64_t
+box_info_lsn(void)
+{
+	/*
+	 * Self can be NULL during bootstrap: entire box.info
+	 * bundle becomes available soon after entering box.cfg{}
+	 * and replication bootstrap relies on this as it looks
+	 * at box.info.status.
+	 */
+	struct replica *self = replica_by_uuid(&INSTANCE_UUID);
+	if (self != NULL && (self->id != REPLICA_ID_NIL || replication_anon))
+		return vclock_get(box_vclock, self->id);
+	else
+		return -1;
+}
+
 static inline void
 box_register_replica(uint32_t id, const struct tt_uuid *uuid)
 {
